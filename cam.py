@@ -6,7 +6,7 @@ from imutils.video import VideoStream
 # Define a function to get the red mask
 def get_red_mask(hsv_frame):
     lower_red1 = np.array([0, 50, 50])
-    upper_red1 = np.array([10, 255, 255])
+    upper_red1 = np.array([15, 255, 255])
     lower_red2 = np.array([170, 50, 50])
     upper_red2 = np.array([180, 255, 255])
     
@@ -22,24 +22,35 @@ def get_sticker_mask(hsv_frame):
     # lower = np.array([35, 100, 100]) # green
     # upper = np.array([85, 255, 255])
 
-    # lower = np.array([0, 0, 200]) # white
-    # upper = np.array([180, 25, 255])
+    lower = np.array([0, 0, 180]) # white
+    upper = np.array([180, 170, 255])
 
-    lower = np.array([0, 0, 0]) # black
-    upper = np.array([180, 255, 50])
+    # lower = np.array([0, 0, 0]) # black
+    # upper = np.array([180, 255, 100])
     
-    white_mask = cv2.inRange(hsv_frame, lower, upper)
+    # lower = np.array([0, 100, 50])  # blue
+    # upper = np.array([150, 255, 255])
+
+    mask = cv2.inRange(hsv_frame, lower, upper)
     
-    return white_mask
+    return mask
 
 # Initialize video capture (0 for the default camera)
 cap = cv2.VideoCapture(0)
 
 # List to store the coordinates of the red ball and white patch
 red_coordinates = []
-white_coordinates = []
+prev_white_coordinates = []
+i = 0
+cumulated_rotation = [0, 0]
 
 while True:
+    if i % 10 == 0:
+        print("Frame", i, ": ", cumulated_rotation)
+        cumulated_rotation = [0, 0]
+    i = i + 1
+
+    white_coordinates = []
     # Read a frame from the video capture
     ret, frame = cap.read(1)
     
@@ -89,7 +100,7 @@ while True:
             # largest_white_contour = max(white_contours, key=cv2.contourArea)
 
             for sticker_contour in sticker_contours:
-                if cv2.contourArea(sticker_contour) > 100:  # Adjust threshold as needed
+                if cv2.contourArea(sticker_contour) > 150:  # Adjust threshold as needed
                     wx, wy, ww, wh = cv2.boundingRect(sticker_contour)
                     # Adjust the coordinates to map back to the original frame
                     wx += x
@@ -98,6 +109,14 @@ while True:
                     white_patch_center = (int(wx + ww / 2), int(wy + wh / 2))
                     white_coordinates.append(white_patch_center)
                     cv2.circle(frame, white_patch_center, 5, (255, 0, 255), -1)
+
+            if len(white_coordinates) > 0:
+                if len(prev_white_coordinates) > 0:
+                    local_rotation = np.mean(white_coordinates, axis=0) - np.mean(prev_white_coordinates, axis=0)
+                    cumulated_rotation += local_rotation
+                prev_white_coordinates = white_coordinates
+            else:
+                prev_white_coordinates = []
 
     # Display the frame with tracking annotations
     cv2.imshow('Red Ball and White Patch Tracking', frame)
@@ -109,12 +128,3 @@ while True:
 # Release the video capture and close all windows
 cap.release()
 cv2.destroyAllWindows()
-
-# Print the coordinates of the red ball and white patch
-print("Coordinates of the red ball in each frame:")
-for coord in red_coordinates:
-    print(coord)
-
-print("Coordinates of the white patch in each frame:")
-for coord in white_coordinates:
-    print(coord)
