@@ -18,9 +18,13 @@ def get_red_mask(hsv_frame):
     return red_mask
 
 # Define a function to get the white mask
-def get_white_mask(hsv_frame):
+def get_sticker_mask(hsv_frame):
+    # lower = np.array([35, 100, 100]) # green
+    # upper = np.array([85, 255, 255])
+
     # lower = np.array([0, 0, 200]) # white
     # upper = np.array([180, 25, 255])
+
     lower = np.array([0, 0, 0]) # black
     upper = np.array([180, 255, 50])
     
@@ -37,7 +41,7 @@ white_coordinates = []
 
 while True:
     # Read a frame from the video capture
-    ret, frame = cap.read()
+    ret, frame = cap.read(1)
     
     if not ret:
         print("Failed to grab frame")
@@ -50,7 +54,7 @@ while True:
     red_mask = get_red_mask(hsv_frame)
     
     # Get the white mask
-    white_mask = get_white_mask(hsv_frame)
+    sticker_mask = get_sticker_mask(hsv_frame)
 
     # Find contours in the red mask
     red_contours, _ = cv2.findContours(red_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
@@ -72,27 +76,28 @@ while True:
     # If the red ball is detected, search for the white patch within its area
     if red_ball_center is not None:
         # Create a region of interest around the red ball
-        roi = white_mask[y:y+h, x:x+w]
+        roi = sticker_mask[y:y+h, x:x+w]
 
         # Find contours in the white mask within the ROI
-        white_contours, _ = cv2.findContours(roi, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        sticker_contours, _ = cv2.findContours(roi, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         
         # Initialize the center of the white patch
-        white_patch_center = None
+        sticker_patch_center = None
         
         # Draw contours and find the largest white patch
-        if white_contours:
-            largest_white_contour = max(white_contours, key=cv2.contourArea)
+        if sticker_contours:
+            # largest_white_contour = max(white_contours, key=cv2.contourArea)
 
-            if cv2.contourArea(largest_white_contour) > 100:  # Adjust threshold as needed
-                wx, wy, ww, wh = cv2.boundingRect(largest_white_contour)
-                # Adjust the coordinates to map back to the original frame
-                wx += x
-                wy += y
-                cv2.rectangle(frame, (wx, wy), (wx + ww, wy + wh), (255, 255, 255), 2)
-                white_patch_center = (int(wx + ww / 2), int(wy + wh / 2))
-                white_coordinates.append(white_patch_center)
-                cv2.circle(frame, white_patch_center, 5, (255, 255, 0), -1)
+            for sticker_contour in sticker_contours:
+                if cv2.contourArea(sticker_contour) > 100:  # Adjust threshold as needed
+                    wx, wy, ww, wh = cv2.boundingRect(sticker_contour)
+                    # Adjust the coordinates to map back to the original frame
+                    wx += x
+                    wy += y
+                    # cv2.rectangle(frame, (wx, wy), (wx + ww, wy + wh), (255, 255, 255), 2)
+                    white_patch_center = (int(wx + ww / 2), int(wy + wh / 2))
+                    white_coordinates.append(white_patch_center)
+                    cv2.circle(frame, white_patch_center, 5, (255, 0, 255), -1)
 
     # Display the frame with tracking annotations
     cv2.imshow('Red Ball and White Patch Tracking', frame)
