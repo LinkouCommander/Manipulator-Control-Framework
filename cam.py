@@ -22,11 +22,28 @@ def get_sticker_mask(hsv_frame):
     # lower = np.array([35, 100, 100]) # green
     # upper = np.array([85, 255, 255])
 
-    lower = np.array([0, 0, 180]) # white
-    upper = np.array([180, 170, 255])
+    # lower = np.array([0, 0, 180]) # white
+    # upper = np.array([180, 50, 255])
 
-    # lower = np.array([0, 0, 0]) # black
-    # upper = np.array([180, 255, 100])
+    lower = np.array([0, 0, 0])  # lower bound for black in HSV
+    upper = np.array([180, 255, 100])
+    
+    # lower = np.array([0, 100, 50])  # blue
+    # upper = np.array([150, 255, 255])
+
+    mask = cv2.inRange(hsv_frame, lower, upper)
+    
+    return mask
+
+def get_black_mask(hsv_frame):
+    # lower = np.array([35, 100, 100]) # green
+    # upper = np.array([85, 255, 255])
+
+    # lower = np.array([0, 0, 180]) # white
+    # upper = np.array([180, 50, 255])
+
+    lower = np.array([0, 0, 0])  # lower bound for black in HSV
+    upper = np.array([180, 255, 100])
     
     # lower = np.array([0, 100, 50])  # blue
     # upper = np.array([150, 255, 255])
@@ -36,7 +53,7 @@ def get_sticker_mask(hsv_frame):
     return mask
 
 # Initialize video capture (0 for the default camera)
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(1)
 
 # List to store the coordinates of the red ball and white patch
 red_coordinates = []
@@ -61,11 +78,15 @@ while True:
     # Convert the frame to HSV color space
     hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     
+    blur_frame = cv2.GaussianBlur(hsv_frame, (5, 5), 0)
+
     # Get the red mask
     red_mask = get_red_mask(hsv_frame)
     
     # Get the white mask
     sticker_mask = get_sticker_mask(hsv_frame)
+
+    black_mask = get_black_mask(hsv_frame)
 
     # Find contours in the red mask
     red_contours, _ = cv2.findContours(red_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
@@ -100,12 +121,12 @@ while True:
             # largest_white_contour = max(white_contours, key=cv2.contourArea)
 
             for sticker_contour in sticker_contours:
-                if cv2.contourArea(sticker_contour) > 150:  # Adjust threshold as needed
+                if cv2.contourArea(sticker_contour) > 300:  # Adjust threshold as needed
                     wx, wy, ww, wh = cv2.boundingRect(sticker_contour)
                     # Adjust the coordinates to map back to the original frame
                     wx += x
                     wy += y
-                    # cv2.rectangle(frame, (wx, wy), (wx + ww, wy + wh), (255, 255, 255), 2)
+                    cv2.rectangle(frame, (wx, wy), (wx + ww, wy + wh), (255, 255, 255), 2)
                     white_patch_center = (int(wx + ww / 2), int(wy + wh / 2))
                     white_coordinates.append(white_patch_center)
                     cv2.circle(frame, white_patch_center, 5, (255, 0, 255), -1)
@@ -120,6 +141,7 @@ while True:
 
     # Display the frame with tracking annotations
     cv2.imshow('Red Ball and White Patch Tracking', frame)
+    cv2.imshow('blur', blur_frame)
     
     # Break the loop on 'q' key press
     if cv2.waitKey(1) & 0xFF == ord('q'):
