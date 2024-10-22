@@ -37,10 +37,15 @@ def get_red_mask(hsv_frame):
 
 # Function to get white mask
 def get_white_mask(hsv_frame):
-    lower_white = np.array([0, 0, 155])
-    upper_white = np.array([180, 30, 255])
+    # white
+    lower = np.array([0, 0, 155])
+    upper = np.array([180, 30, 255])
+
+    # black
+    # lower = np.array([0, 0, 0])
+    # upper = np.array([180, 255, 50])
     
-    white_mask = cv2.inRange(hsv_frame, lower_white, upper_white)
+    white_mask = cv2.inRange(hsv_frame, lower, upper)
     
     return white_mask
 
