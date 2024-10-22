@@ -49,7 +49,12 @@ def get_white_mask(hsv_frame):
     
     return white_mask
 
+# Frame track
+red_coordinates = []
+prev_white_coordinates = []
 i = 0
+cumulated_rotation = [0, 0]
+
 # Ball tracking loop
 while True:
     # Capture frame from the video source
@@ -108,6 +113,14 @@ while True:
                     if radius_w > 10:  # Adjust this radius threshold based on your sticker size
                         # cv2.circle(frame, (int(x_w), int(y_w)), int(radius_w), (255, 255, 255), 2)
                         cv2.circle(frame, white_center, 5, (255, 0, 255), -1)
+
+                        if len(white_center) > 0:
+                            if len(prev_white_coordinates) > 0:
+                                local_rotation = np.mean(white_center, axis=0) - np.mean(prev_white_coordinates, axis=0)
+                                cumulated_rotation += local_rotation
+                            prev_white_coordinates = white_center
+                        else:
+                            prev_white_coordinates = []
 
     i = i + 1
     # pts.appendleft(center)  # Update the tracked points
