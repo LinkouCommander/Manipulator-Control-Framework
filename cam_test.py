@@ -11,8 +11,8 @@ ap = argparse.ArgumentParser()
 ap.add_argument("-b", "--buffer", type=int, default=64, help="max buffer size")
 args = vars(ap.parse_args())
 
-# Define color limits and initialize a buffer for tracking points
-pts = deque(maxlen=args["buffer"])  # Deque to store tracked points
+# # Define color limits and initialize a buffer for tracking points
+# pts = deque(maxlen=args["buffer"])  # Deque to store tracked points
 
 # Initialize the video stream
 vs = VideoStream(src=0).start()  # Start the webcam
@@ -37,7 +37,7 @@ def get_red_mask(hsv_frame):
 
 # Function to get white mask
 def get_white_mask(hsv_frame):
-    lower_white = np.array([0, 0, 150])
+    lower_white = np.array([0, 0, 155])
     upper_white = np.array([180, 30, 255])
     
     white_mask = cv2.inRange(hsv_frame, lower_white, upper_white)
@@ -105,7 +105,7 @@ while True:
                         cv2.circle(frame, white_center, 5, (255, 0, 255), -1)
 
     i = i + 1
-    pts.appendleft(center)  # Update the tracked points
+    # pts.appendleft(center)  # Update the tracked points
     cv2.imshow("Ball and Sticker Tracking", frame)  # Display the frame with tracking info
     cv2.imshow('Red mask', red_mask)  # Show the red mask
     cv2.imshow('White mask', white_mask)  # Show the white mask
