@@ -5,6 +5,8 @@ import argparse
 import cv2
 import imutils
 import time
+import math
+import matplotlib.pyplot as plt
 
 # Argument parsing
 ap = argparse.ArgumentParser()
@@ -49,14 +51,81 @@ def get_white_mask(hsv_frame):
     
     return white_mask
 
+def get_radians(point1, point2):
+    # 計算向量內積
+    if np.array_equal(point1, [0, 0]) or np.array_equal(point2, [0, 0]):
+        return 0
+    
+    x1, y1 = point1
+    x2, y2 = point2
+
+    dot_product = x1 * x2 + y1 * y2
+
+    # 計算向量的長度（模）
+    magnitude_A = math.sqrt(x1**2 + y1**2)
+    magnitude_B = math.sqrt(x2**2 + y2**2)
+
+    # 檢查向量模是否為零，防止除以零
+    if magnitude_A == 0 or magnitude_B == 0:
+        return 0
+
+    # 計算 cos_theta 並限制在 [-1, 1] 之間
+    cos_theta = dot_product / (magnitude_A * magnitude_B)
+    cos_theta = np.clip(cos_theta, -1.0, 1.0)
+
+    # 計算夾角的弧度
+    angle_radians = math.acos(cos_theta)    
+
+    return angle_radians
+
+def get_angular_velocity(radians):
+    fps = 30
+    time_interval = 10 / fps
+
+    omega = radians / time_interval
+
+    return omega
+
 # Frame track
 red_coordinates = []
+white_coordinates = []
 prev_white_coordinates = []
 i = 0
 cumulated_rotation = [0, 0]
 
-# Ball tracking loop
+radians_list  = []
+radians = 0
+angular_velocity_list = []
+angular_velocity = 0
+
 while True:
+    if i % 10 == 0:
+        if white_coordinates and len(white_coordinates) == len(prev_white_coordinates):
+            x1, y1 = prev_white_coordinates[0] 
+            x2, y2 = white_coordinates[0]
+
+            # delta_x = x2 - x1
+            # delta_y = y2 - y1
+            # radians = math.atan2(delta_y, delta_x)
+
+            print(prev_white_coordinates[0], white_coordinates[0])
+            radians = get_radians(prev_white_coordinates[0], white_coordinates[0])
+            angular_velocity = get_angular_velocity(radians)
+
+            print("Frame", i, "radians:", radians, ", angular velocity = ", angular_velocity)
+
+            prev_white_coordinates = white_coordinates
+        elif white_coordinates:
+            prev_white_coordinates = white_coordinates
+        else:
+            prev_white_coordinates = []
+        radians_list.append(radians)  # 儲存每幀的弧度
+        angular_velocity_list.append(angular_velocity)
+        # print("Frame", i, "radians:", radians)
+        radians = 0
+        angular_velocity = 0
+        white_coordinates = []
+
     # Capture frame from the video source
     frame = vs.read()
     frame = frame[1] if args.get("video", False) else frame  # Get the frame if from a video source
@@ -113,16 +182,36 @@ while True:
                     if radius_w > 10:  # Adjust this radius threshold based on your sticker size
                         # cv2.circle(frame, (int(x_w), int(y_w)), int(radius_w), (255, 255, 255), 2)
                         cv2.circle(frame, white_center, 5, (255, 0, 255), -1)
+                        if i % 10 == 0:
+                            white_coordinates.append(np.array(white_center) - np.array(center))
 
-                        if len(white_center) > 0:
-                            if len(prev_white_coordinates) > 0:
-                                local_rotation = np.mean(white_center, axis=0) - np.mean(prev_white_coordinates, axis=0)
-                                cumulated_rotation += local_rotation
-                            prev_white_coordinates = white_center
-                        else:
-                            prev_white_coordinates = []
+            # if len(white_center) > 0:
+            #     if len(prev_white_coordinates) > 0:
+            #         local_rotation = np.mean(white_coordinates, axis=0) - np.mean(prev_white_coordinates, axis=0)
+            #         cumulated_rotation += local_rotation
+            #     prev_white_coordinates = white_center
+            # else:
+            #     prev_white_coordinates = []
+            # if i % 10 == 0:
+            #     if len(white_coordinates) > 0:
+            #         if len(white_coordinates) == len(prev_white_coordinates):
+            #             x1, y1 = prev_white_coordinates[0]  # 前一幀的座標
+            #             x2, y2 = white_coordinates[0]       # 當前幀的座標
+
+            #             # 計算Δx 和Δy
+            #             delta_x = x2 - x1
+            #             delta_y = y2 - y1
+
+            #             # 使用 atan2 計算弧度
+            #             radians = math.atan2(delta_y, delta_x)
+            #             # print("Frame", i, "radians:", radians)
+            #         prev_white_coordinates = white_coordinates
+            #     else:
+            #         prev_white_coordinates = []
+            #         radians = 0
 
     i = i + 1
+
     # pts.appendleft(center)  # Update the tracked points
     cv2.imshow("Ball and Sticker Tracking", frame)  # Display the frame with tracking info
     cv2.imshow('Red mask', red_mask)  # Show the red mask
@@ -131,6 +220,36 @@ while True:
 
     if key == ord("q"):
         break  # Break the loop if 'q' is pressed
+
+# # 繪製弧度圖表
+# plt.plot(radians_list, label="Radians over frames")
+# plt.xlabel("Frame")
+# plt.ylabel("Radians")
+# plt.title("Radians of white sticker movement")
+# plt.legend()
+# plt.show()
+
+# 繪製角度和角速度的圖表
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+
+# 繪製弧度圖表
+ax1.plot(radians_list, label="Radians over frames", color='b')
+ax1.set_xlabel("Frame intervals")
+ax1.set_ylabel("Radians")
+ax1.set_title("Radians of White Sticker Movement")
+ax1.legend()
+ax1.grid()
+
+# 繪製角速度圖表
+ax2.plot(angular_velocity_list, label="Angular Velocity (radians/sec)", color='r')
+ax2.set_xlabel("Frame intervals")
+ax2.set_ylabel("Angular Velocity (radians/sec)")
+ax2.set_title("Angular Velocity of White Sticker Movement")
+ax2.legend()
+ax2.grid()
+
+plt.tight_layout()  # 調整佈局以防止重疊
+plt.show()
 
 # Release resources and close windows
 cv2.destroyAllWindows()
