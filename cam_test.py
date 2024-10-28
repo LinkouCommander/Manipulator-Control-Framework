@@ -8,6 +8,8 @@ import time
 import math
 import matplotlib.pyplot as plt
 
+interval = 5
+
 # Argument parsing
 ap = argparse.ArgumentParser()
 ap.add_argument("-b", "--buffer", type=int, default=64, help="max buffer size")
@@ -80,11 +82,14 @@ def get_radians(point1, point2):
 
 def get_angular_velocity(radians):
     fps = 30
-    time_interval = 10 / fps
+    time_interval = interval / fps
 
     omega = radians / time_interval
 
     return omega
+
+def miniDistance(point1, point2):
+    return math.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
 
 # Frame track
 red_coordinates = []
@@ -99,21 +104,55 @@ angular_velocity_list = []
 angular_velocity = 0
 
 while True:
-    if i % 10 == 0:
-        if white_coordinates and len(white_coordinates) == len(prev_white_coordinates):
-            x1, y1 = prev_white_coordinates[0] 
-            x2, y2 = white_coordinates[0]
+    if i % interval == 0:
+        if white_coordinates and prev_white_coordinates:
+            # x1, y1 = prev_white_coordinates[0] 
+            # x2, y2 = white_coordinates[0]
 
-            # delta_x = x2 - x1
-            # delta_y = y2 - y1
-            # radians = math.atan2(delta_y, delta_x)
+            # # delta_x = x2 - x1
+            # # delta_y = y2 - y1
+            # # radians = math.atan2(delta_y, delta_x)
 
-            print(prev_white_coordinates[0], white_coordinates[0])
-            radians = get_radians(prev_white_coordinates[0], white_coordinates[0])
-            angular_velocity = get_angular_velocity(radians)
+            # print(prev_white_coordinates[0], white_coordinates[0])
+            # radians = get_radians(prev_white_coordinates[0], white_coordinates[0])
+            # angular_velocity = get_angular_velocity(radians)
 
-            print("Frame", i, "radians:", radians, ", angular velocity = ", angular_velocity)
+            # print("Frame", i, "radians:", radians, ", angular velocity = ", angular_velocity)
 
+            # prev_white_coordinates = white_coordinates
+
+            nearest_points = []
+            closest_map = {}
+            for curr_point in white_coordinates:
+                min_distance = float('inf')
+                closest_point = None
+
+                for prev_point in prev_white_coordinates:
+                    dist = miniDistance(prev_point, curr_point)
+                    if dist < min_distance:
+                        min_distance = dist
+                        closest_point = prev_point
+
+                if closest_point is not None:  # 確保找到了最近的點
+                    # 將 closest_point 轉換為 tuple，以便作為鍵
+                    closest_point_key = tuple(closest_point)  # 將 closest_point 轉為 tuple
+                    
+                    if closest_point_key not in closest_map:
+                        closest_map[closest_point_key] = (curr_point, min_distance)
+                    elif min_distance < closest_map[closest_point_key][1]:
+                        closest_map[closest_point_key] = (curr_point, min_distance)
+
+            nearest_points = [(v[0], k) for k, v in closest_map.items()]
+
+            total_angular_velocity = 0
+            for (prev_point, curr_point) in nearest_points:
+                print(prev_point, curr_point)
+                radians = get_radians(prev_point, curr_point)
+                angular_velocity = get_angular_velocity(radians)
+                total_angular_velocity += angular_velocity
+
+            average_angular_velocity = total_angular_velocity / len(nearest_points)
+            print("Frame", i, "radians:", radians, ", angular velocity = ", average_angular_velocity)
             prev_white_coordinates = white_coordinates
         elif white_coordinates:
             prev_white_coordinates = white_coordinates
@@ -182,7 +221,7 @@ while True:
                     if radius_w > 10:  # Adjust this radius threshold based on your sticker size
                         # cv2.circle(frame, (int(x_w), int(y_w)), int(radius_w), (255, 255, 255), 2)
                         cv2.circle(frame, white_center, 5, (255, 0, 255), -1)
-                        if i % 10 == 0:
+                        if i % interval == 0:
                             white_coordinates.append(np.array(white_center) - np.array(center))
 
             # if len(white_center) > 0:
