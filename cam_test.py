@@ -19,7 +19,7 @@ args = vars(ap.parse_args())
 # pts = deque(maxlen=args["buffer"])  # Deque to store tracked points
 
 # Initialize the video stream
-vs = VideoStream(src=0).start()  # Start the webcam
+vs = VideoStream(src=1).start()  # Start the webcam
 time.sleep(2.0)  # Allow the camera to warm up
 
 # Define the threshold for ball height
@@ -42,12 +42,12 @@ def get_red_mask(hsv_frame):
 # Function to get white mask
 def get_white_mask(hsv_frame):
     # white
-    lower = np.array([0, 0, 155])
-    upper = np.array([180, 30, 255])
+    # lower = np.array([0, 0, 155])
+    # upper = np.array([180, 30, 255])
 
     # black
-    # lower = np.array([0, 0, 0])
-    # upper = np.array([180, 255, 50])
+    lower = np.array([0, 0, 0])
+    upper = np.array([180, 255, 50])
     
     white_mask = cv2.inRange(hsv_frame, lower, upper)
     
