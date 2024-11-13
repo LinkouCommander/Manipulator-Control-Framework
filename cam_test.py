@@ -19,7 +19,7 @@ args = vars(ap.parse_args())
 # pts = deque(maxlen=args["buffer"])  # Deque to store tracked points
 
 # Initialize the video stream
-vs = VideoStream(src=1).start()  # Start the webcam
+vs = VideoStream(src=0).start()  # Start the webcam
 time.sleep(2.0)  # Allow the camera to warm up
 
 # Define the threshold for ball height
@@ -39,15 +39,34 @@ def get_red_mask(hsv_frame):
     
     return red_mask
 
+def get_non_red_mask(hsv_frame):
+    # 取得紅色遮罩
+    red_mask = get_red_mask(hsv_frame)
+    
+    # 反轉紅色遮罩，得到非紅色區域
+    non_red_mask = cv2.bitwise_not(red_mask)
+    return non_red_mask
+
+def apply_circular_mask(mask, center, radius):
+    # 建立一個與 mask 相同大小的黑色遮罩
+    circular_mask = np.zeros_like(mask)
+    
+    # 在遮罩上繪製一個白色圓形，僅限於紅色球的範圍
+    cv2.circle(circular_mask, center, int(radius), 255, -1)
+    
+    # 將圓形遮罩應用於非紅色遮罩上，僅保留圓形範圍內的區域
+    masked_result = cv2.bitwise_and(mask, circular_mask)
+    return masked_result
+
 # Function to get white mask
 def get_white_mask(hsv_frame):
     # white
-    # lower = np.array([0, 0, 155])
-    # upper = np.array([180, 30, 255])
+    lower = np.array([0, 0, 155])
+    upper = np.array([180, 30, 255])
 
     # black
-    lower = np.array([0, 0, 0])
-    upper = np.array([180, 255, 50])
+    # lower = np.array([0, 0, 0])
+    # upper = np.array([180, 255, 50])
     
     white_mask = cv2.inRange(hsv_frame, lower, upper)
     
@@ -187,6 +206,10 @@ while True:
     white_mask = cv2.erode(white_mask, None, iterations=2)
     white_mask = cv2.dilate(white_mask, None, iterations=2)
 
+    non_red_mask = get_non_red_mask(hsv)
+    non_red_mask = cv2.erode(non_red_mask, None, iterations=2)
+    non_red_mask = cv2.dilate(non_red_mask, None, iterations=2)
+
     # Find contours to track the red ball
     cnts = cv2.findContours(red_mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cnts = imutils.grab_contours(cnts)
@@ -204,11 +227,19 @@ while True:
             cv2.circle(frame, (int(x), int(y)), int(radius), (0, 0, 255), 2)
             cv2.circle(frame, center, 5, (0, 0, 255), -1)
 
+            cv2.circle(non_red_mask, (int(x), int(y)), int(radius), (0, 0, 255), 2)
+            cv2.circle(non_red_mask, center, 5, (0, 0, 255), -1)
+
+            non_red_mask = apply_circular_mask(non_red_mask, center, radius * 0.91)
+
             # Now find white stickers that are within the red ball's radius
-            white_cnts = cv2.findContours(white_mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            white_cnts = cv2.findContours(non_red_mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             white_cnts = imutils.grab_contours(white_cnts)
 
             for wc in white_cnts:
+                area = cv2.contourArea(wc)
+                if area < 200:  # 忽略面積過小的 contours
+                    continue
                 # Calculate the white sticker's center and radius
                 ((x_w, y_w), radius_w) = cv2.minEnclosingCircle(wc)
                 M_w = cv2.moments(wc)
@@ -254,7 +285,8 @@ while True:
     # pts.appendleft(center)  # Update the tracked points
     cv2.imshow("Ball and Sticker Tracking", frame)  # Display the frame with tracking info
     cv2.imshow('Red mask', red_mask)  # Show the red mask
-    cv2.imshow('White mask', white_mask)  # Show the white mask
+    cv2.imshow('None Red mask', non_red_mask)
+    # cv2.imshow('White mask', white_mask)  # Show the white mask
     key = cv2.waitKey(1) & 0xFF  # Check for user input
 
     if key == ord("q"):

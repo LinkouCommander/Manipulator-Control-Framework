@@ -23,6 +23,27 @@ time.sleep(2.0)
 # Define color limits and threshold for ball height
 height_threshold = 350
 
+class KalmanFilter:
+    def __init__(self):
+        self.Q = 1e-5  # 過程雜訊協方差
+        self.R = 0.1   # 測量雜訊協方差
+        self.P = 1.0   # 估計誤差協方差
+        self.x = 0.0   # 狀態變數 (角度)
+        self.K = 0.0   # 卡爾曼增益
+
+    def update(self, measurement):
+        # 預測步驟
+        self.P = self.P + self.Q
+        
+        # 更新步驟
+        self.K = self.P / (self.P + self.R)
+        self.x = self.x + self.K * (measurement - self.x)
+        self.P = (1 - self.K) * self.P
+        return self.x
+
+# 初始化卡爾曼濾波器
+kf = KalmanFilter()
+
 def get_red_mask(hsv_frame):
     lower_red1 = np.array([0, 50, 50])
     upper_red1 = np.array([15, 255, 255])
@@ -35,14 +56,36 @@ def get_red_mask(hsv_frame):
     red_mask = cv2.bitwise_or(mask1, mask2)
     return red_mask
 
+def get_non_red_mask(hsv_frame):
+    # 取得紅色遮罩
+    red_mask = get_red_mask(hsv_frame)
+    
+    # 反轉紅色遮罩，得到非紅色區域
+    non_red_mask = cv2.bitwise_not(red_mask)
+    return non_red_mask
+
+def apply_circular_mask(mask, center, radius):
+    # 建立一個與 mask 相同大小的黑色遮罩
+    circular_mask = np.zeros_like(mask)
+    
+    # 在遮罩上繪製一個白色圓形，僅限於紅色球的範圍
+    cv2.circle(circular_mask, center, int(radius), 255, -1)
+    
+    # 將圓形遮罩應用於非紅色遮罩上，僅保留圓形範圍內的區域
+    masked_result = cv2.bitwise_and(mask, circular_mask)
+    return masked_result
+
 def get_mark_mask(hsv_frame):
     # Define HSV range for black
-    lower_black = np.array([0, 0, 0])
-    upper_black = np.array([180, 255, 50])  # Adjust upper value based on lighting
+    # lower = np.array([0, 0, 0])
+    # upper = np.array([180, 255, 50])  # Adjust upper value based on lighting
+
+    lower = np.array([0, 0, 155])
+    upper = np.array([180, 30, 255])
 
     # Create mask for black
-    black_mask = cv2.inRange(hsv_frame, lower_black, upper_black)
-    return black_mask
+    mask = cv2.inRange(hsv_frame, lower, upper)
+    return mask
 
 def get_angular_velocity(degrees):
     # 將角度轉換為弧度
@@ -84,6 +127,10 @@ while True:
     mark_mask = cv2.erode(mark_mask, None, iterations=2)
     mark_mask = cv2.dilate(mark_mask, None, iterations=2)
 
+    non_red_mask = get_non_red_mask(hsv)
+    non_red_mask = cv2.erode(non_red_mask, None, iterations=2)
+    non_red_mask = cv2.dilate(non_red_mask, None, iterations=2)
+
     cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cnts = imutils.grab_contours(cnts)
     center = None
@@ -92,26 +139,32 @@ while True:
         c = max(cnts, key=cv2.contourArea)
         ((x, y), radius) = cv2.minEnclosingCircle(c)
         M = cv2.moments(c)
-        center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
+        # center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
+        center = (int(x), int(y))
         
         if radius > 40:
             cv2.circle(frame, (int(x), int(y)), int(radius), (0, 0, 255), 2)
             cv2.circle(frame, center, 5, (0, 0, 255), -1)
 
+            non_red_mask = apply_circular_mask(non_red_mask, (int(x), int(y)), radius * 0.91)
+
             # Now find white stickers that are within the red ball's radius
-            mark_cnts = cv2.findContours(mark_mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            mark_cnts = cv2.findContours(non_red_mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             mark_cnts = imutils.grab_contours(mark_cnts)
 
             # Initialize variable to hold the largest contour
             largest_contour = None
+            largest_center = None
             largest_area = 0
             largest_radius = 0
             for mc in mark_cnts:
+                area = cv2.contourArea(mc)
+                if area < 300:  # 忽略面積過小的 contours
+                    continue
                 # Calculate the white sticker's center and radius
                 ((x_w, y_w), radius_w) = cv2.minEnclosingCircle(mc)
                 M_w = cv2.moments(mc)
                 mark_center = (int(M_w["m10"] / M_w["m00"]), int(M_w["m01"] / M_w["m00"]))  # Calculate the center
-
                 mark_center_distance = miniDistance(mark_center, center)
 
                 # Record mark center if within distance and radius threshold
@@ -122,22 +175,25 @@ while True:
                         largest_contour = mc
                         largest_area = area
                         largest_radius = radius_w
+                        largest_center = mark_center
 
             if largest_contour is not None and len(c) >= 5:
-                c = largest_contour
-
                 num_sections = 4
-                ellipse = cv2.fitEllipse(c)
+                ellipse = cv2.fitEllipse(largest_contour)
 
                 if counter % 10 == 0:
                     print(ellipse)
                 angle = ellipse[2]
+                # angle = kf.update(angle) # use Kalman Filter
                 angles.append(angle)  # Store the angle for plotting
 
                 if prev_angle is not None:
                     velocity = get_angular_velocity(angle - prev_angle)
-                    if abs(velocity) > 20: 
-                        velocity = 0
+                    # if abs(velocity) > 10: 
+                    #     if velocities:
+                    #         velocity = velocities[-1]
+                    #     else:
+                    #         velocity = 0
                     velocities.append(velocity)
                 prev_angle = angle
 
@@ -146,11 +202,18 @@ while True:
                     start_angle = int(angle + i * section_angle)
                     end_angle = int(angle + (i + 1) * section_angle)
                     section_color = (0, 0, 0) if i % 2 == 0 else (0, 255, 255)
-                    cv2.ellipse(frame, center, (int(largest_radius), int(largest_radius)), 0, start_angle, end_angle, section_color, -1)
+                    cv2.ellipse(frame, mark_center, (int(largest_radius), int(largest_radius)), 0, start_angle, end_angle, section_color, -1)
 
     counter += 1
     pts.appendleft(center)
     cv2.imshow("Ball Tracking", frame)
+    cv2.imshow('None Red mask', non_red_mask)
+    cv2.imshow('Red mask', mask)
+
+    mean_velocity = np.mean(velocities)
+    measurement_noise_covariance = np.var(velocities, ddof=1)
+    print("variance (R):", measurement_noise_covariance)
+
     key = cv2.waitKey(1) & 0xFF
     if key == ord("q"):
         break
