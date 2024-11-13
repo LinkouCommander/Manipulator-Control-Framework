@@ -88,6 +88,7 @@ def moving_average(velocity, buffer, window_size):
 
         if abs(velocity - mean) > 5 * std_dev:
             buffer.append(buffer[-1])
+            velocity = buffer[-1]
         else:
             buffer.append(velocity)
     else:
@@ -98,14 +99,17 @@ def moving_average(velocity, buffer, window_size):
         buffer.pop(0)
     
     # 計算移動平均
-    avg_velocity = sum(buffer) / len(buffer)
-    return avg_velocity
+    # avg_velocity = sum(buffer) / len(buffer)
+    return velocity
 
 angles = []  # List to store angles for plotting
 velocities = []
 mv_velocities = []
-angle = None
+curr_angle = 0
 prev_angle = None
+
+rect_list = []
+prev_rect_list = []
 
 counter = 0
 # Ball tracking loop
@@ -196,42 +200,44 @@ while True:
 
                 cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
 
+                # rect_list.append(np.array(rect[0]) - np.array(center))
+
                 if rect_area > largest_area:
                     largest_contour = mc
                     largest_rect = rect
 
-            if largest_contour is not None and len(c) >= 5 and counter % 5 == 0:
-                # num_sections = 4
+            if largest_contour is not None and len(c) >= 5 and counter % 2 == 0:
+                curr_angle = largest_rect[2]
                 # ellipse = cv2.fitEllipse(largest_contour)
                 # ellipse_center, ellipse_axes, ellipse_angle = ellipse
 
                 # if counter % 10 == 0:
                 #     print(ellipse)
-                angles.append(largest_rect[2])  # Store the angle for plotting
-                print(largest_rect[2])
+                angles.append(curr_angle)  # Store the angle for plotting
+                print(curr_angle)
 
                 if prev_angle is not None:
-                    velocity = get_angular_velocity(largest_rect[2] - prev_angle)
-                    if abs(velocity) > 10: 
-                        if velocities:
-                            velocity = velocities[-1]
-                        else:
-                            velocity = 0
-                    velocities.append(velocity)
+                    velocity = get_angular_velocity(curr_angle - prev_angle)
+                    # if abs(velocity) > 10: 
+                    #     if velocities:
+                    #         velocity = velocities[-1]
+                    #     else:
+                    #         velocity = 0
+                    velocities.append(abs(velocity))
 
-                    mv_velocity = moving_average(velocity, velocity_buffer, window_size)
-                    mv_velocities.append(mv_velocity)
-                prev_angle = largest_rect[2]
+                    # mv_velocity = moving_average(velocity, velocity_buffer, window_size)
+                    # mv_velocities.append(mv_velocity)
+                prev_angle = curr_angle
 
             #     ellipse_center = (int(ellipse_center[0]), int(ellipse_center[1]))
             #     major_axis, minor_axis = int(ellipse_axes[0] // 2), int(ellipse_axes[1] // 2)
-
-            #     section_angle = 360 / num_sections
-            #     for i in range(num_sections):
-            #         start_angle = int(ellipse_angle + i * section_angle)
-            #         end_angle = int(ellipse_angle + (i + 1) * section_angle)
-            #         section_color = (0, 0, 0) if i % 2 == 0 else (0, 255, 255)
-            #         cv2.ellipse(frame, ellipse_center, (major_axis, minor_axis), 0, start_angle, end_angle, section_color, -1)
+            num_sections = 4
+            section_angle = 360 / num_sections
+            for i in range(num_sections):
+                start_angle = int(curr_angle + i * section_angle)
+                end_angle = int(curr_angle + (i + 1) * section_angle)
+                section_color = (0, 0, 0) if i % 2 == 0 else (0, 255, 255)
+                cv2.ellipse(frame, center, (int(radius), int(radius)), 0, start_angle, end_angle, section_color, -1)
 
     counter += 1
     pts.appendleft(center)
@@ -264,12 +270,12 @@ ax2.set_ylabel("Velocity (radians/sec)")
 ax2.grid(True)
 ax2.legend()
 
-ax2.plot(range(len(mv_velocities)), mv_velocities, label="Moving Average Velocity")
-ax2.set_title("Moving Average Velocity of Ball Over Time")
-ax2.set_xlabel("Frame")
-ax2.set_ylabel("Velocity (radians/sec)")
-ax2.grid(True)
-ax2.legend()
+# ax2.plot(range(len(mv_velocities)), mv_velocities, label="Moving Average Velocity")
+# ax2.set_title("Moving Average Velocity of Ball Over Time")
+# ax2.set_xlabel("Frame")
+# ax2.set_ylabel("Velocity (radians/sec)")
+# ax2.grid(True)
+# ax2.legend()
 
 plt.tight_layout()
 plt.show()
