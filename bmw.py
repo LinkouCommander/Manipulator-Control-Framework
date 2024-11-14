@@ -7,6 +7,7 @@ import imutils
 import time
 import matplotlib.pyplot as plt
 import math
+from scipy.signal import medfilt
 
 # Argument parsing
 ap = argparse.ArgumentParser()
@@ -66,12 +67,12 @@ def get_mark_mask(hsv_frame):
     mask = cv2.inRange(hsv_frame, lower, upper)
     return mask
 
+interval = 2
 def get_angular_velocity(degrees):
     # 將角度轉換為弧度
     radians = math.radians(degrees)
     
     # 計算角速度
-    interval = 1
     time_seconds = interval / 30
     angular_velocity = radians / time_seconds
     return angular_velocity
@@ -79,31 +80,9 @@ def get_angular_velocity(degrees):
 def miniDistance(point1, point2):
     return math.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
 
-window_size = 10
-velocity_buffer = []
-def moving_average(velocity, buffer, window_size):
-    if len(buffer) == window_size:
-        mean = np.mean(buffer)
-        std_dev = np.std(buffer)
-
-        if abs(velocity - mean) > 5 * std_dev:
-            buffer.append(buffer[-1])
-            velocity = buffer[-1]
-        else:
-            buffer.append(velocity)
-    else:
-        buffer.append(velocity)
-
-    # 如果緩衝區超過窗口大小，則移除最舊的元素
-    if len(buffer) > window_size:
-        buffer.pop(0)
-    
-    # 計算移動平均
-    # avg_velocity = sum(buffer) / len(buffer)
-    return velocity
-
 angles = []  # List to store angles for plotting
 velocities = []
+velocity = 0
 mv_velocities = []
 curr_angle = 0
 prev_angle = None
@@ -112,6 +91,7 @@ rect_list = []
 prev_rect_list = []
 
 counter = 0
+zero_counter = 0
 # Ball tracking loop
 while True:
     frame = vs.read()
@@ -145,7 +125,6 @@ while True:
         c = max(cnts, key=cv2.contourArea)
         ((x, y), radius) = cv2.minEnclosingCircle(c)
         M = cv2.moments(c)
-        # center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
         center = (int(x), int(y))
         
         if radius > 40:
@@ -168,21 +147,6 @@ while True:
                 area = cv2.contourArea(mc)
                 if area < 300:  # 忽略面積過小的 contours
                     continue
-                # Calculate the white sticker's center and radius
-                # ((x_w, y_w), radius_w) = cv2.minEnclosingCircle(mc)
-                # M_w = cv2.moments(mc)
-                # mark_center = (int(M_w["m10"] / M_w["m00"]), int(M_w["m01"] / M_w["m00"]))  # Calculate the center
-                # mark_center_distance = miniDistance(mark_center, center)
-
-                # # Record mark center if within distance and radius threshold
-                # if mark_center_distance < radius and radius_w > 10:
-                #     area = cv2.contourArea(mc)
-                #     if area > largest_area:
-                #         # Update largest contour and area if this one is bigger
-                #         largest_contour = mc
-                #         largest_area = area
-                #         largest_radius = radius_w
-                #         largest_center = mark_center
 
                 rect = cv2.minAreaRect(mc)
                 box = cv2.boxPoints(rect)
@@ -200,44 +164,70 @@ while True:
 
                 cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
 
-                # rect_list.append(np.array(rect[0]) - np.array(center))
+                rect_list.append(rect)
 
                 if rect_area > largest_area:
                     largest_contour = mc
                     largest_rect = rect
 
-            if largest_contour is not None and len(c) >= 5 and counter % 2 == 0:
-                curr_angle = largest_rect[2]
-                # ellipse = cv2.fitEllipse(largest_contour)
-                # ellipse_center, ellipse_axes, ellipse_angle = ellipse
+            if counter % interval == 0:
+                if rect_list and prev_rect_list:
+                    nearest_points = []
+                    closest_map = {}
+                    for curr_point in rect_list:
+                        min_distance = float('inf')
+                        closest_point = None
 
-                # if counter % 10 == 0:
-                #     print(ellipse)
-                angles.append(curr_angle)  # Store the angle for plotting
-                print(curr_angle)
+                        for prev_point in prev_rect_list:
+                            # print(prev_point[0], curr_point[0])
+                            dist = miniDistance(prev_point[0], curr_point[0])
+                            # if dist > 500:
+                            #     continue
+                            if dist < min_distance:
+                                min_distance = dist
+                                closest_point = prev_point
 
-                if prev_angle is not None:
-                    velocity = get_angular_velocity(curr_angle - prev_angle)
-                    # if abs(velocity) > 10: 
-                    #     if velocities:
-                    #         velocity = velocities[-1]
-                    #     else:
-                    #         velocity = 0
-                    velocities.append(abs(velocity))
+                        if closest_point is not None:  # 確保找到了最近的點
+                            # 將 closest_point 轉換為 tuple，以便作為鍵
+                            closest_point_key = tuple(closest_point)  # 將 closest_point 轉為 tuple
+                            
+                            if closest_point_key not in closest_map:
+                                closest_map[closest_point_key] = (curr_point, min_distance)
+                            elif min_distance < closest_map[closest_point_key][1]:
+                                closest_map[closest_point_key] = (curr_point, min_distance)
 
-                    # mv_velocity = moving_average(velocity, velocity_buffer, window_size)
-                    # mv_velocities.append(mv_velocity)
-                prev_angle = curr_angle
+                    nearest_points = [(v[0], k) for k, v in closest_map.items()]
 
-            #     ellipse_center = (int(ellipse_center[0]), int(ellipse_center[1]))
-            #     major_axis, minor_axis = int(ellipse_axes[0] // 2), int(ellipse_axes[1] // 2)
-            num_sections = 4
-            section_angle = 360 / num_sections
-            for i in range(num_sections):
-                start_angle = int(curr_angle + i * section_angle)
-                end_angle = int(curr_angle + (i + 1) * section_angle)
-                section_color = (0, 0, 0) if i % 2 == 0 else (0, 255, 255)
-                cv2.ellipse(frame, center, (int(radius), int(radius)), 0, start_angle, end_angle, section_color, -1)
+                    total_angular_velocity = 0
+                    total_angle = 0
+                    for (prev_point, curr_point) in nearest_points:
+
+                        total_angle += curr_point[2] - prev_point[2]
+                        total_angular_velocity += get_angular_velocity(curr_point[2] - prev_point[2])
+
+                    velocity = total_angular_velocity / len(nearest_points)
+                    curr_angle = total_angle / len(nearest_points)
+                    prev_rect_list = rect_list
+                elif rect_list:
+                    prev_rect_list = rect_list
+                else:
+                    prev_rect_list = []
+
+                # if abs(velocity) > 10:
+                #     if velocities:
+                #         velocity = velocities[-1]
+                #     else:
+                #         velocity = 0
+                # if curr_angle == 0 and angles and angles[-1] != 0 and zero_counter < :
+                #     curr_angle = angles[-1]
+                #     velocity = velocities[-1]
+                #     zero_counter = counter
+
+                print("Frame", counter, ", angle = ", curr_angle, ", angular velocity = ", velocity)
+
+                angles.append(curr_angle)  # 儲存每幀的弧度
+                velocities.append(velocity)
+                rect_list = []
 
     counter += 1
     pts.appendleft(center)
@@ -245,13 +235,15 @@ while True:
     # cv2.imshow('None Red mask', non_red_mask)
     # cv2.imshow('Red mask', mask)
 
-    # mean_velocity = np.mean(velocities)
-    # measurement_noise_covariance = np.var(velocities, ddof=1)
-    # print("variance (R):", measurement_noise_covariance)
-
     key = cv2.waitKey(1) & 0xFF
     if key == ord("q"):
         break
+
+# print(velocities)
+window_size = 11
+filtered_data = medfilt(velocities, kernel_size=window_size)
+max_angular_velocity = np.max(abs(filtered_data))
+print("Maximum velocity:", max_angular_velocity, "(radians/sec)")
 
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 
@@ -264,18 +256,12 @@ ax1.grid(True)
 ax1.legend()
 
 ax2.plot(range(len(velocities)), velocities, label="Velocity")
+plt.plot(range(len(velocities)), filtered_data, label='Median Filter Data', linewidth=2)
 ax2.set_title("Velocity of Ball Over Time")
 ax2.set_xlabel("Frame")
 ax2.set_ylabel("Velocity (radians/sec)")
 ax2.grid(True)
 ax2.legend()
-
-# ax2.plot(range(len(mv_velocities)), mv_velocities, label="Moving Average Velocity")
-# ax2.set_title("Moving Average Velocity of Ball Over Time")
-# ax2.set_xlabel("Frame")
-# ax2.set_ylabel("Velocity (radians/sec)")
-# ax2.grid(True)
-# ax2.legend()
 
 plt.tight_layout()
 plt.show()
