@@ -90,7 +90,7 @@ class HandEnv(gym.Env):
         self.move_actuators(action[:6])
         self.move_slider(action[6])
 
-        observation = self.capture_camera_image()
+        observation = self.capture_camera_image() # add tactile here?
         ball_position = self.get_ball_position(observation)
         reward = self.calculate_reward(ball_position, action)
         done = self.check_done()
@@ -223,6 +223,13 @@ class HandEnv(gym.Env):
         x, y = ball_position
         distance_to_target = np.sqrt((x - 320)**2 + (y - 240)**2)
         return -distance_to_target / 100.0 
+
+    def calculate_reward_with_rotation(self, ball_position, radians, action):
+        if ball_position is None:
+            return -1
+        x, y = ball_position
+        distance_to_target = np.sqrt((x - 320)**2 + (y - 240)**2)
+        return -distance_to_target * 0.49 + radians * 0.51
 
     def check_done(self):
         return False

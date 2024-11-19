@@ -67,7 +67,7 @@ def get_mark_mask(hsv_frame):
     mask = cv2.inRange(hsv_frame, lower, upper)
     return mask
 
-interval = 2
+interval = 1
 def get_angular_velocity(degrees):
     # 將角度轉換為弧度
     radians = math.radians(degrees)
@@ -228,6 +228,14 @@ while True:
                 angles.append(curr_angle)  # 儲存每幀的弧度
                 velocities.append(velocity)
                 rect_list = []
+
+            # num_sections = 4
+            # section_angle = 360 / num_sections
+            # for i in range(num_sections):
+            #     start_angle = int(curr_angle + i * section_angle)
+            #     end_angle = int(curr_angle + (i + 1) * section_angle)
+            #     section_color = (0, 0, 0) if i % 2 == 0 else (0, 255, 255)
+            #     cv2.ellipse(frame, center, (radius, radius), 0, start_angle, end_angle, section_color, -1)
 
     counter += 1
     pts.appendleft(center)
