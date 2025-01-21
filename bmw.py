@@ -124,7 +124,7 @@ while True:
     if len(cnts) > 0:
         c = max(cnts, key=cv2.contourArea)
         ((x, y), radius) = cv2.minEnclosingCircle(c)
-        M = cv2.moments(c)
+        # M = cv2.moments(c)
         center = (int(x), int(y))
         
         if radius > 40:
