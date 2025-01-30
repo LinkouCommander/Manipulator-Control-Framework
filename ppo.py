@@ -24,7 +24,7 @@ if MY_DXL == 'X_SERIES' or MY_DXL == 'MX_SERIES':
     BAUDRATE = 1000000
 
 PROTOCOL_VERSION = 2.0
-DEVICENAME = '/dev/ttyUSB0'
+DEVICENAME = 'COM4'
 TORQUE_ENABLE = 1
 TORQUE_DISABLE = 0
 DXL_MOVING_STATUS_THRESHOLD = 20
@@ -44,7 +44,7 @@ class HandEnv(gym.Env):
         self.observation_space = gym.spaces.Box(low=0, high=255, shape=(480, 640, 3), dtype=np.uint8)
 
         self.dxl_ids = [10, 11, 12, 20, 21, 22, 30, 31, 32]
-        self.ser = initialize_serial(port='/dev/ttyACM0', baud_rate=9600)
+        self.ser = initialize_serial(port='COM3', baud_rate=9600)
         self.camera = None
 
         if not portHandler.openPort():

@@ -11,6 +11,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
 
 import imutils
+import math
 
 # DYNAMIXEL Model definition
 MY_DXL = 'X_SERIES'
@@ -116,7 +117,7 @@ class HandEnv(gym.Env):
         self.set_initial_positions([10, 20, 30], 1000)  # Set motors 10, 20, and 30 to position 1000
 
         # Return initial observation
-        observation = self.capture_camera_image()
+        observation = [self.capture_camera_image(), tactile]
         return observation, {}
 
 
@@ -265,9 +266,100 @@ class HandEnv(gym.Env):
             # find white stickers that are within the red ball's radius
             mark_cnts = cv2.findContours(circular_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
-            if mark_cnts is None:
-                return 0
+            # if mark_cnts is None:
+            #     return None
+
+            rect_list = []
             
+            for mc in mark_cnts:
+                area = cv2.contourArea(mc)
+
+                # ignore small contours
+                if area < 300:
+                    continue
+                
+                # Compute the minimum bounding rectangle and extract its integer vertices
+                rect = cv2.minAreaRect(mc)
+                box = cv2.boxPoints(rect)
+                box = np.int0(box)
+
+                # Calculate rectangle are
+                rect_area = cv2.contourArea(box)
+
+                # Filter out if the ratio of the contour area to the rectangle area is less than min_area_ratio
+                area_ratio = area / rect_area
+                if area_ratio < 0.7:
+                    continue
+
+                # cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
+
+                rect_list.append(rect)
+
+            return rect_list
+
+        rect_list = get_mark_position(frame)
+        
+        def miniDistance(point1, point2):
+            return math.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
+
+        def get_angular_velocity(degrees):
+            # 將角度轉換為弧度
+            radians = math.radians(degrees)
+            
+            interval = 1
+            # 計算角速度
+            time_seconds = interval / 30
+            angular_velocity = radians / time_seconds
+            return angular_velocity
+
+        def calculate_velocity():
+            nearest_points = []
+            closest_map = {}
+
+            for curr_point in rect_list:
+                min_distance = float('inf')
+                closest_point = None
+
+                for prev_point in prev_rect_list:
+                    # print(prev_point[0], curr_point[0])
+                    dist = miniDistance(prev_point[0], curr_point[0])
+                    # if dist > 500:
+                    #     continue
+                    if dist < min_distance:
+                        min_distance = dist
+                        closest_point = prev_point
+
+                if closest_point is not None:  # 確保找到了最近的點
+                    # 將 closest_point 轉換為 tuple，以便作為鍵
+                    closest_point_key = tuple(closest_point)  # 將 closest_point 轉為 tuple
+                    
+                    if closest_point_key not in closest_map:
+                        closest_map[closest_point_key] = (curr_point, min_distance)
+                    elif min_distance < closest_map[closest_point_key][1]:
+                        closest_map[closest_point_key] = (curr_point, min_distance)
+
+            nearest_points = [(v[0], k) for k, v in closest_map.items()]
+
+            total_angular_velocity = 0
+            total_angle = 0
+            for (prev_point, curr_point) in nearest_points:
+
+                total_angle += curr_point[2] - prev_point[2]
+                total_angular_velocity += get_angular_velocity(curr_point[2] - prev_point[2])
+
+            velocity = total_angular_velocity / len(nearest_points)
+            curr_angle = total_angle / len(nearest_points)
+            prev_rect_list = rect_list
+
+            return velocity
+
+        if rect_list and prev_rect_list:
+            velocity = calculate_velocity()
+        elif rect_list:
+            prev_rect_list = rect_list
+        else:
+            prev_rect_list = []
+
 
 
         return 0
