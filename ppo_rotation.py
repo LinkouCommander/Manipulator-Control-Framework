@@ -12,6 +12,7 @@ from stable_baselines3.common.env_checker import check_env
 
 import imutils
 import math
+from fsr_data_collector import FSRDataCollector
 
 # DYNAMIXEL Model definition
 MY_DXL = 'X_SERIES'
@@ -50,6 +51,9 @@ class HandEnv(gym.Env):
         self.ser = initialize_serial(port='/dev/ttyACM0', baud_rate=9600)
         self.camera = None
 
+        # Create an instance of the FSRDataCollector
+        self.collector = FSRDataCollector()
+
         if not portHandler.openPort():
             print("Failed to open the port")
             self.return_to_initial_state_and_disable_torque()
@@ -86,6 +90,8 @@ class HandEnv(gym.Env):
         self.ball_positions = []
         self.accumulated_rewards = []
 
+        self.prev_rect_list = []
+
     def control_cost(self, action):
         return np.sum(np.square(action))
 
@@ -93,19 +99,38 @@ class HandEnv(gym.Env):
         self.move_actuators(action[:6])
         self.move_slider(action[6])
 
-        observation = self.capture_camera_image() # add tactile here?
-        ball_position, _ = self.get_ball_position(observation)
-        reward = self.calculate_reward(ball_position, action)
-        done = self.check_done()
+        # Capture the camera image
+        img = self.capture_camera_image()
 
-         # Determine if episode is done based on task-specific logic
+        # Calculate the reward
+        reward = self.calculate_reward(img, action)
+        # reward = self.calculate_reward_with_rotation(img, action)
+
+        # Determine if episode is done based on task-specific logic
         terminated = self.check_done()  # Changed done to terminated
         truncated = False  # For now, assume no truncation
 
-
+        # Prepare the info dictionary
         info = {}
+
+        # Get the ball position and update the internal state
+        ball_position, _ = self.get_ball_position(img)
         self.ball_positions.append(ball_position)
         self.accumulated_rewards.append(reward)
+
+        # Stop data collection and retrieve force values
+        force_A0, force_A1, force_A2 = self.collector.get_data()
+        if (force_A0 is not None) and (force_A1 is not None) and (force_A2 is not None):
+            print("Current FSR good good")
+        else:
+            print("FSR NOT available.")
+        self.collector.close()
+
+        # Combine camera image and FSR data into observation
+        observation = {
+            "vec": [force_A0, force_A1, force_A2],  # Use 'vec' for FSR values
+            "img": img,  # Include the image in observation
+        }
 
         return observation, reward, terminated, truncated, info
 
@@ -116,10 +141,24 @@ class HandEnv(gym.Env):
         self.move_actuators(np.zeros(6))  # Move actuators to initial positions
         self.set_initial_positions([10, 20, 30], 1000)  # Set motors 10, 20, and 30 to position 1000
 
-        # Return initial observation
-        observation = [self.capture_camera_image(), tactile]
-        return observation, {}
+        # Capture initial observation
+        img = self.capture_camera_image()
 
+        # Stop data collection and retrieve force values
+        force_A0, force_A1, force_A2 = self.collector.get_data()
+        if (force_A0 is not None) and (force_A1 is not None) and (force_A2 is not None):
+            print("Current FSR good good")
+        else:
+            print("FSR NOT available.")
+        self.collector.close()
+
+        # Create the observation dictionary as per the guide
+        observation = {
+            "vec": [force_A0, force_A1, force_A2],  # FSR values can be stored in a list
+            "img": img,  # Camera image
+        }
+
+        return observation, {}
 
     def render(self, mode='human'):
         if self.render_mode == 'human':
@@ -235,8 +274,8 @@ class HandEnv(gym.Env):
         else:
             return None
 
-
-    def calculate_reward(self, center, action):
+    def calculate_reward(self, frame, action):
+        center, _ = self.get_ball_position(frame)
         if center is None:
             return -1
         x, y = center
@@ -312,7 +351,7 @@ class HandEnv(gym.Env):
             angular_velocity = radians / time_seconds
             return angular_velocity
 
-        def calculate_velocity():
+        def calculate_velocity(rect_list, prev_rect_list):
             nearest_points = []
             closest_map = {}
 
@@ -353,16 +392,27 @@ class HandEnv(gym.Env):
 
             return velocity
 
-        if rect_list and prev_rect_list:
-            velocity = calculate_velocity()
+        if rect_list and self.prev_rect_list:
+            velocity = calculate_velocity(rect_list, self.prev_rect_list)
+            self.prev_rect_list = rect_list
         elif rect_list:
-            prev_rect_list = rect_list
+            self.prev_rect_list = rect_list
+            velocity = 0
         else:
-            prev_rect_list = []
+            self.prev_rect_list = []
+            velocity = 0
 
+        # calculate ball lefting
+        if center is None:
+            distance_to_target = 240
+        else:
+            x, y = center
+            # distance_to_target = np.sqrt((x - 320)**2 + (y - 240)**2)
 
+            height_threshold = 240
+            distance_to_target = abs(y - height_threshold)
 
-        return 0
+        return velocity * 0.51 - distance_to_target * 0.49
 
     def check_done(self):
         return False
@@ -397,7 +447,7 @@ if __name__ == "__main__":
     model = PPO('MlpPolicy', env, verbose=1)
 
     # Train the model
-    model.learn(total_timesteps=1)
+    model.learn(total_timesteps=10000)
 
     # Save the model
     model.save("ppo_hand_env")
@@ -408,7 +458,7 @@ if __name__ == "__main__":
     # Run the trained model
     obs = env.reset()
     total_reward = 0
-    num_timesteps = 10
+    num_timesteps = 1
     try:
         for _ in range(num_timesteps):
             action, _states = model.predict(obs)
@@ -416,6 +466,7 @@ if __name__ == "__main__":
             # time.sleep(0.1)
             obs, reward, done, info = env.step(action)
             total_reward += reward
+
             env.render()
             if done:
                 obs = env.reset()
