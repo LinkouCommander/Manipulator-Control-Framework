@@ -11,10 +11,13 @@ def main():
     try:
         while True:
             frame = vs.read()
-            frame, lifting_reward = tracker.track_ball(frame)  # Process the frame with the tracker
+            frame, lifting_reward, velocity = tracker.track_ball(frame)  # Process the frame with the tracker
 
             cv2.imshow("Ball Tracking", frame)
-            print("Lifting Reward:", lifting_reward)  # Print the lifting reward
+            # print("Lifting Reward:", lifting_reward, ", Velocity:", velocity)  # Print the lifting reward
+
+            total_reward = tracker.get_rewards()
+            print("Reward:", total_reward)
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):  # Press 'q' to exit

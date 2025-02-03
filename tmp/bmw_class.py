@@ -26,9 +26,26 @@ class BallTracker:
         self.filter = RealTimeIIR(alpha=alpha)
         self.counter = 0
         self.lifting_reward_list = []
+        self.rotation_reward_list = []
         self.total_reward_list = []
         self.velocities = []
         self.angles = []
+        self.prev_rect_list = []
+
+    def get_ball_position(self, frame):
+        mask = self.get_red_mask(frame)
+        mask = cv2.erode(mask, None, iterations=2)
+        mask = cv2.dilate(mask, None, iterations=2)
+
+        contours = cv2.findContours(mask.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        contours = imutils.grab_contours(contours)
+
+        if contours:
+            largest_contour = max(contours, key=cv2.contourArea)
+            (x, y), radius = cv2.minEnclosingCircle(largest_contour)
+            return (int(x), int(y)), radius
+        else:
+            return None, None
 
     def get_red_mask(self, hsv_frame):
         lower_red1 = np.array([0, 50, 50])
@@ -38,6 +55,7 @@ class BallTracker:
         
         mask1 = cv2.inRange(hsv_frame, lower_red1, upper_red1)
         mask2 = cv2.inRange(hsv_frame, lower_red2, upper_red2)
+
         return cv2.bitwise_or(mask1, mask2)
 
     def get_mark_mask(self, hsv_frame):
@@ -50,33 +68,148 @@ class BallTracker:
         blurred = cv2.GaussianBlur(frame, (11, 11), 0)
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
 
-        mask = self.get_red_mask(hsv)
-        mask = cv2.erode(mask, None, iterations=2)
-        mask = cv2.dilate(mask, None, iterations=2)
+        center, radius = self.get_ball_position(hsv)
 
-        cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cnts = imutils.grab_contours(cnts)
         lifting_reward = -3
+        cv2.line(frame, (0, self.height_threshold), (frame.shape[1], self.height_threshold), (0, 255, 0), 2)
 
-        if len(cnts) > 0:
-            c = max(cnts, key=cv2.contourArea)
-            ((x, y), radius) = cv2.minEnclosingCircle(c)
-            center = (int(x), int(y))
+        if center is None:
+            return frame, lifting_reward, 0
+        x, y = center
 
-            if radius > 40:
-                cv2.circle(frame, (int(x), int(y)), int(radius), (0, 0, 255), 2)
-                cv2.circle(frame, center, 5, (0, 0, 255), -1)
+        if radius < 40:
+            return frame, lifting_reward, 0
+        
+        cv2.circle(frame, center, int(radius), (0, 0, 255), 2)
+        cv2.circle(frame, center, 5, (0, 0, 255), -1)
 
-                distance_to_target = abs(y - self.height_threshold)
-                lifting_reward = -distance_to_target / 100
+        def get_mark_position(hsv):
+            # get non red mask
+            red_mask = self.get_red_mask(hsv)
+            red_mask = cv2.erode(red_mask, None, iterations=2)
+            red_mask = cv2.dilate(red_mask, None, iterations=2)
+            non_red_mask = cv2.bitwise_not(red_mask)
+            non_red_mask = cv2.erode(non_red_mask, None, iterations=2)
+            non_red_mask = cv2.dilate(non_red_mask, None, iterations=2)
+            # get circular mask
+            circular_mask = np.zeros_like(non_red_mask)
+            cv2.circle(circular_mask, center, int(radius), 255, -1)
+            circular_mask_1 = cv2.bitwise_and(non_red_mask, circular_mask)
+            # find white stickers that are within the red ball's radius
+            mark_cnts = cv2.findContours(circular_mask_1.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            mark_cnts = imutils.grab_contours(mark_cnts)
+
+            # if mark_cnts is None:
+            #     return None
+
+            rect_list = []
+            
+            for mc in mark_cnts:
+                area = cv2.contourArea(mc)
+
+                # ignore small contours
+                if area < 300:
+                    continue
+                
+                # Compute the minimum bounding rectangle and extract its integer vertices
+                rect = cv2.minAreaRect(mc)
+                box = cv2.boxPoints(rect)
+                box = np.int0(box)
+
+                # Calculate rectangle are
+                rect_area = cv2.contourArea(box)
+
+                # Filter out if the ratio of the contour area to the rectangle area is less than min_area_ratio
+                area_ratio = area / rect_area
+                if area_ratio < 0.7:
+                    continue
+
+                cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
+
+                rect_list.append(rect)
+
+            return rect_list
+
+        rect_list = get_mark_position(hsv)
+
+        def miniDistance(point1, point2):
+            return math.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
+
+        def get_angular_velocity(degrees):
+            # 將角度轉換為弧度
+            radians = math.radians(degrees)
+            
+            interval = 1
+            # 計算角速度
+            time_seconds = interval / 30
+            angular_velocity = radians / time_seconds
+            return angular_velocity
+
+        def calculate_velocity(rect_list, prev_rect_list):
+            nearest_points = []
+            closest_map = {}
+
+            for curr_point in rect_list:
+                min_distance = float('inf')
+                closest_point = None
+
+                for prev_point in prev_rect_list:
+                    # print(prev_point[0], curr_point[0])
+                    dist = miniDistance(prev_point[0], curr_point[0])
+                    # if dist > 500:
+                    #     continue
+                    if dist < min_distance:
+                        min_distance = dist
+                        closest_point = prev_point
+
+                if closest_point is not None:  # 確保找到了最近的點
+                    # 將 closest_point 轉換為 tuple，以便作為鍵
+                    closest_point_key = tuple(closest_point)  # 將 closest_point 轉為 tuple
+                    
+                    if closest_point_key not in closest_map:
+                        closest_map[closest_point_key] = (curr_point, min_distance)
+                    elif min_distance < closest_map[closest_point_key][1]:
+                        closest_map[closest_point_key] = (curr_point, min_distance)
+
+            nearest_points = [(v[0], k) for k, v in closest_map.items()]
+
+            total_angular_velocity = 0
+            total_angle = 0
+            for (prev_point, curr_point) in nearest_points:
+                total_angle += curr_point[2] - prev_point[2]
+                total_angular_velocity += get_angular_velocity(curr_point[2] - prev_point[2])
+
+            velocity = total_angular_velocity / len(nearest_points)
+            velocity = self.filter.process(velocity)
+
+            return velocity
+
+        if rect_list and self.prev_rect_list:
+            velocity = calculate_velocity(rect_list, self.prev_rect_list)
+            self.prev_rect_list = rect_list
+        elif rect_list:
+            self.prev_rect_list = rect_list
+            velocity = 0
+        else:
+            self.prev_rect_list = []
+            velocity = 0
+
+        rotation_reward = abs(velocity)
+
+        distance_to_target = abs(y - self.height_threshold)
+        lifting_reward = -distance_to_target / 100
 
         self.lifting_reward_list.append(lifting_reward)
+        self.rotation_reward_list.append(rotation_reward)
         self.counter += 1
 
-        return frame, lifting_reward
+        total_reward = self.rotation_reward_list[-1] * 0.51 - self.lifting_reward_list[-1] * 0.49
+        self.total_reward_list.append(total_reward)
+
+        return frame, lifting_reward, abs(velocity)
 
     def get_rewards(self):
-        return self.lifting_reward_list[-1]
+        return self.total_reward_list[-1]
 
     def plot_results(self):
         window_size = 11
