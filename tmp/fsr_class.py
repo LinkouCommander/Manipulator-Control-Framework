@@ -44,14 +44,14 @@ class FSRSerialReader:
                     self.binary_data["A2"].append(1 if force_A2 > self.threshold else 0)
                 except ValueError:
                     continue
-            else:
-                print(f"Arduino: {data}")
+            # else:
+            #     print(f"Arduino: {data}")
 
     def get_fsr(self):
         return (
-            self.force_data["A0"][-1] if self.force_data["A0"] else None,
-            self.force_data["A1"][-1] if self.force_data["A1"] else None,
-            self.force_data["A2"][-1] if self.force_data["A2"] else None
+            self.force_data["A0"][-1] if self.force_data["A0"] else 0,
+            self.force_data["A1"][-1] if self.force_data["A1"] else 0,
+            self.force_data["A2"][-1] if self.force_data["A2"] else 0
         )
 
     def start_collection(self):
@@ -65,12 +65,20 @@ class FSRSerialReader:
             self.data_thread.join()
         self.ser.close()
     
-    def send_position(self, pos):
-        if 0 <= pos <= 180:
-            with self.ser_lock:
-                self.ser.write(f"{pos}\n".encode('utf-8'))
+    def send_slider_position(self, pos):
+        if pos.isdigit():
+            pos = int(pos)
+            if 75 <= pos <= 145:
+                with self.ser_lock:
+                    self.ser.write(f"{pos}\n".encode('utf-8'))  # Send position to Arduino
+                    return "success"
+            else:
+                return "Invalid position. Please enter a value between 75 and 145."
+        # elif pos.lower() == 'exit':
+        #     self.stop_collecting = True
+        #     return None
         else:
-            print("Invalid position. Please enter a value between 0 and 180.")
+            return "Invalid command."
     
     def plot_data(self):
         plt.figure(1)

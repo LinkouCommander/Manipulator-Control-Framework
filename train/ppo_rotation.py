@@ -28,7 +28,7 @@ if MY_DXL == 'X_SERIES' or MY_DXL == 'MX_SERIES':
     BAUDRATE = 1000000
 
 PROTOCOL_VERSION = 2.0
-DEVICENAME = '/dev/ttyUSB0'
+DEVICENAME = 'COM5'
 TORQUE_ENABLE = 1
 TORQUE_DISABLE = 0
 DXL_MOVING_STATUS_THRESHOLD = 20
@@ -285,134 +285,6 @@ class HandEnv(gym.Env):
         distance_to_target = abs(y - height_threshold)
 
         return -distance_to_target / 100.0
-
-    def calculate_reward_with_rotation(self, frame, action):
-        center, radians = self.get_ball_position(frame)
-        if center is None:
-            return 0
-        x, y = center
-        
-        if radians < 40:
-            return 0
-        
-        def get_mark_position(hsv):
-            # get non red mask
-            red_mask = self.get_red_mask(hsv)
-            non_red_mask = cv2.bitwise_not(red_mask)
-            # get circular mask
-            circular_mask = np.zeros_like(non_red_mask)
-            circular_mask = cv2.bitwise_and(non_red_mask, circular_mask)
-            # find white stickers that are within the red ball's radius
-            mark_cnts = cv2.findContours(circular_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
-            # if mark_cnts is None:
-            #     return None
-
-            rect_list = []
-            
-            for mc in mark_cnts:
-                area = cv2.contourArea(mc)
-
-                # ignore small contours
-                if area < 300:
-                    continue
-                
-                # Compute the minimum bounding rectangle and extract its integer vertices
-                rect = cv2.minAreaRect(mc)
-                box = cv2.boxPoints(rect)
-                box = np.int0(box)
-
-                # Calculate rectangle are
-                rect_area = cv2.contourArea(box)
-
-                # Filter out if the ratio of the contour area to the rectangle area is less than min_area_ratio
-                area_ratio = area / rect_area
-                if area_ratio < 0.7:
-                    continue
-
-                # cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
-
-                rect_list.append(rect)
-
-            return rect_list
-
-        rect_list = get_mark_position(frame)
-        
-        def miniDistance(point1, point2):
-            return math.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
-
-        def get_angular_velocity(degrees):
-            # 將角度轉換為弧度
-            radians = math.radians(degrees)
-            
-            interval = 1
-            # 計算角速度
-            time_seconds = interval / 30
-            angular_velocity = radians / time_seconds
-            return angular_velocity
-
-        def calculate_velocity(rect_list, prev_rect_list):
-            nearest_points = []
-            closest_map = {}
-
-            for curr_point in rect_list:
-                min_distance = float('inf')
-                closest_point = None
-
-                for prev_point in prev_rect_list:
-                    # print(prev_point[0], curr_point[0])
-                    dist = miniDistance(prev_point[0], curr_point[0])
-                    # if dist > 500:
-                    #     continue
-                    if dist < min_distance:
-                        min_distance = dist
-                        closest_point = prev_point
-
-                if closest_point is not None:  # 確保找到了最近的點
-                    # 將 closest_point 轉換為 tuple，以便作為鍵
-                    closest_point_key = tuple(closest_point)  # 將 closest_point 轉為 tuple
-                    
-                    if closest_point_key not in closest_map:
-                        closest_map[closest_point_key] = (curr_point, min_distance)
-                    elif min_distance < closest_map[closest_point_key][1]:
-                        closest_map[closest_point_key] = (curr_point, min_distance)
-
-            nearest_points = [(v[0], k) for k, v in closest_map.items()]
-
-            total_angular_velocity = 0
-            total_angle = 0
-            for (prev_point, curr_point) in nearest_points:
-
-                total_angle += curr_point[2] - prev_point[2]
-                total_angular_velocity += get_angular_velocity(curr_point[2] - prev_point[2])
-
-            velocity = total_angular_velocity / len(nearest_points)
-            curr_angle = total_angle / len(nearest_points)
-            prev_rect_list = rect_list
-
-            return velocity
-
-        if rect_list and self.prev_rect_list:
-            velocity = calculate_velocity(rect_list, self.prev_rect_list)
-            self.prev_rect_list = rect_list
-        elif rect_list:
-            self.prev_rect_list = rect_list
-            velocity = 0
-        else:
-            self.prev_rect_list = []
-            velocity = 0
-
-        # calculate ball lefting
-        if center is None:
-            distance_to_target = 240
-        else:
-            x, y = center
-            # distance_to_target = np.sqrt((x - 320)**2 + (y - 240)**2)
-
-            height_threshold = 240
-            distance_to_target = abs(y - height_threshold)
-
-        return velocity * 0.51 - distance_to_target * 0.49
 
     def check_done(self):
         return False

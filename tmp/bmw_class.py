@@ -203,13 +203,20 @@ class BallTracker:
         self.rotation_reward_list.append(rotation_reward)
         self.counter += 1
 
-        total_reward = self.rotation_reward_list[-1] * 0.51 - self.lifting_reward_list[-1] * 0.49
+        total_reward = self.rotation_reward_list[-1] * 0.51 + self.lifting_reward_list[-1] * 0.49
         self.total_reward_list.append(total_reward)
 
         return frame, lifting_reward, abs(velocity)
 
+    # def get_rewards(self):
+    #     return self.total_reward_list[-1] if self.total_reward_list else -1.5
+
     def get_rewards(self):
-        return self.total_reward_list[-1]
+        return (
+            self.total_reward_list[-1] if self.total_reward_list else -1.5,
+            self.lifting_reward_list[-1] if self.lifting_reward_list else -3,
+            self.rotation_reward_list[-1] if self.rotation_reward_list else 0
+        )
 
     def plot_results(self):
         window_size = 11
