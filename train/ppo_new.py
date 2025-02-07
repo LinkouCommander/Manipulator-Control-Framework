@@ -1,56 +1,259 @@
-import gymnasium as gym
+import serial
 import numpy as np
+import cv2
 import time
+import matplotlib.pyplot as plt
+
+import gymnasium as gym
 from dynamixel_sdk import PortHandler, PacketHandler
+from stable_baselines3 import PPO
+from stable_baselines3.common.env_checker import check_env
+from imutils.video import VideoStream
 
-class MyRealEnv(gym.Env):
-    def __init__(self):
-        super(MyRealEnv, self).__init__()
+from cam_module import BallTracker
+from fsr_slider_module import FSRSerialReader
+
+# DYNAMIXEL Model definition
+MY_DXL = 'X_SERIES'
+
+# Control table address
+if MY_DXL == 'X_SERIES' or MY_DXL == 'MX_SERIES':
+    ADDR_TORQUE_ENABLE = 64
+    ADDR_GOAL_POSITION = 116
+    ADDR_PRESENT_POSITION = 132
+    ADDR_PROFILE_VELOCITY = 112
+    DXL_MINIMUM_POSITION_VALUE = 1900
+    DXL_MAXIMUM_POSITION_VALUE = 2100
+    BAUDRATE = 1000000
+
+PROTOCOL_VERSION = 2.0
+DEVICENAME = 'COM4'
+TORQUE_ENABLE = 1
+TORQUE_DISABLE = 0
+DXL_MOVING_STATUS_THRESHOLD = 20
+
+# Initialize PortHandler instance
+portHandler = PortHandler(DEVICENAME)
+
+# Initialize PacketHandler instance
+packetHandler = PacketHandler(PROTOCOL_VERSION)
+
+class HandEnv(gym.Env):
+    def __init__(self, render_mode='human'):
+        super(HandEnv, self).__init__()
+
+        self.render_mode = render_mode
         self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float32)
+        # Preprocessing (grayscale conversion or downscaling) could be applied to speed up training
         self.observation_space = gym.spaces.Box(low=0, high=255, shape=(480, 640, 3), dtype=np.uint8)
-        
-        self.dxl_ids = [10, 11, 12, 20, 21, 22, 30, 31, 32]
 
-    def reset(self):
-        # 重置環境狀態
-        self.state = np.random.rand(5)  # 假設初始狀態為隨機值
-        return self.state
+        self.dxl_ids = [10, 11, 12, 20, 21, 22, 30, 31, 32] # define idx of motors
+        self.ser = self.initialize_serial(port='COM3', baud_rate=9600)
+        self.camera = None
+
+        self.cam = BallTracker(buffer_size=64, height_threshold=300, alpha=0.2)
+        self.fsr = FSRSerialReader(port='COM4', baudrate=115200, threshold=50)
+        self.fsr.start_collection()
+        self._ij = 0
+
+        self.accumulated_rewards = []
+
+        if not portHandler.openPort():
+            print("Failed to open the port")
+            self.return_to_initial_state_and_disable_torque()
+            quit()
+        # print("Succeeded to open the port")
+
+        if not portHandler.setBaudRate(BAUDRATE):
+            print("Failed to change the baudrate")
+            self.return_to_initial_state_and_disable_torque()
+            quit()
+        # print("Succeeded to change the baudrate")
+
+        # Enable torque for all motors in the list
+        for id in self.dxl_ids:
+            dxl_comm_result, dxl_error = packetHandler.write1ByteTxRx(portHandler, id, ADDR_TORQUE_ENABLE, TORQUE_ENABLE)
+            if dxl_comm_result != COMM_SUCCESS:
+                print("%s" % packetHandler.getTxRxResult(dxl_comm_result))
+            elif dxl_error != 0:
+                print("%s" % packetHandler.getRxPacketError(dxl_error))
+            # else:
+            #     print(f"Dynamixel ID {id} has been successfully connected")
+
+        # Set the desired velocity for all motors
+        desired_velocity = 65
+        for id in self.dxl_ids:
+            dxl_comm_result, dxl_error = packetHandler.write4ByteTxRx(portHandler, id, ADDR_PROFILE_VELOCITY, desired_velocity)
+            if dxl_comm_result != COMM_SUCCESS:
+                print("%s" % packetHandler.getTxRxResult(dxl_comm_result))
+            elif dxl_error != 0:
+                print("%s" % packetHandler.getRxPacketError(dxl_error))
+            # else:
+            #     print(f"Dynamixel ID {id} velocity set successfully")
+
+################################################################################################
+# main function
+################################################################################################
 
     def step(self, action):
-        # 根據動作更新狀態
-        # 執行你的硬體控制邏輯
-        # 獲取當前狀態，獎勵和是否完成的標誌
-        reward = self.compute_reward(action)
-        done = False  # 根據你的邏輯決定是否完成
-        self.state = np.random.rand(5)  # 更新狀態
-        return self.state, reward, done, {}
+        # move dclaw using 0-5th value in action
+        idx = [11, 12, 21, 22, 31, 32]
+        self.move_actuators(idx=idx, action=action[:6])
+        # move slider using 6th value in action
+        self.move_slider(action[6])
 
-    def compute_reward(self, action):
-        # 計算獎勵
-        return np.random.rand()  # 假設獎勵為隨機值
+        # needs to be done
+        # defining different curriculum 
+        if self._ij > 999999:   
+            rot_weight = 1
+            lift_weight = 1
+        else:
+            rot_weight = 1 
+            lift_weight = 1 
+
+        img = self.capture_camera_image()
+        frame = self.cam.track_ball(frame)  # Process the frame with the tracker
+
+        lifting_reward, rotation_reward = self.cam.get_rewards()
+        reward = lifting_reward * lift_weight + rotation_reward * rot_weight
+
+        done = self.check_done() # needs to be done
+        info = {}
+
+        # retrieve force values
+        force_D0, force_D1, force_D2 = self.fsr.get_fsr()
+        # Combine camera image and FSR data into observation
+        observation = {
+            "fsr": [force_D0, force_D1, force_D2],  # Use 'vec' for FSR values
+            "img": img,  # Include the image in observation
+        }
+
+        self.accumulated_rewards.append(reward)
+
+        return observation, reward, done, info
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)  # Pass the seed to the parent class if necessary
+
+        # Implement reset logic here
+        init_pos = [1024, 1536, 2560, 1024, 1536, 2560, 1024, 1536, 2560]
+        self.move_actuators(idx=self.dxl_ids, action=init_pos)  # Move actuators to initial positions
+
+        # Return initial observation
+        img = self.capture_camera_image()
+        # retrieve force values
+        force_D0, force_D1, force_D2 = self.fsr.get_fsr()
+        # Combine camera image and FSR data into observation
+        observation = {
+            "fsr": [force_D0, force_D1, force_D2],  # Use 'vec' for FSR values
+            "img": img,  # Include the image in observation
+        }
+
+        return observation, {}
 
     def render(self, mode='human'):
-        # 可選：渲染環境
-        pass
+        frame = self.capture_camera_image()
+        frame = self.cam.get_frame(frame)
 
-# 使用 Stable Baselines3 訓練模型
-from stable_baselines3 import PPO
+        cv2.imshow('Camera Output', frame)
+        cv2.waitKey(1)
 
-env = MyRealEnv()
-model = PPO("MlpPolicy", env, verbose=1)
+    def close(self):
+        self.ser.close()
+        portHandler.closePort()
+        self.fsr.stop_collection()
+        # self.plot_ball_positions()
+        self.plot_accumulated_rewards()
 
-# 訓練模型
-model.learn(total_timesteps=10000)
+################################################################################################
+# other definition
+################################################################################################
 
-# 測試模型
-obs = env.reset()
-for _ in range(1000):
-    action, _states = model.predict(obs)
-    obs, rewards, done, info = env.step(action)
-    env.render()
-    time.sleep(0.1)  # 模擬延遲
-    if done:
-        obs = env.reset()
+    def initialize_serial(self, port, baud_rate):
+        ser = serial.Serial(port, baud_rate, timeout=1)
+        return ser
 
-# 清理
-env.close()
+    def move_actuators(self, idx, action):
+        # map action value to Dynamixel position
+        positions = np.interp(action, [-0.4, 0.4], [DXL_MINIMUM_POSITION_VALUE, DXL_MAXIMUM_POSITION_VALUE])
+        goal_positions = [int(pos) for pos in positions]
+
+        # Iterate over the motor IDs and their corresponding goal positions
+        for i, id in enumerate(idx):
+            dxl_comm_result, dxl_error = packetHandler.write4ByteTxRx(portHandler, id, ADDR_GOAL_POSITION, goal_positions[i])
+            if dxl_comm_result != COMM_SUCCESS:
+                print("%s" % packetHandler.getTxRxResult(dxl_comm_result))
+            elif dxl_error != 0:
+                print("%s" % packetHandler.getRxPacketError(dxl_error))
+
+    def move_slider(self, action):
+        def send_command(ser, command):
+            if ser.is_open:
+                command = command + "\n"
+                ser.write(command.encode())
+                ser.flush()
+
+        slider_position = np.interp(action, [-1.0, 1.0], [75, 145])
+        respond = self.fsr.send_slider_position(slider_position)
+        print(respond)
+
+    def capture_camera_image(self):
+        if self.camera is None or not self.camera.isOpened():
+            self.camera = cv2.VideoCapture(0)
+        _, frame = self.camera.read()
+        return frame
+    
+    def check_done(self):
+        return False
+
+    def plot_ball_positions(self):
+        ball_positions = [pos[1] if pos is not None else 0 for pos in self.ball_positions]
+        timesteps = range(len(ball_positions))
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(timesteps, ball_positions, label='Vertical Position')
+        plt.gca().invert_yaxis()
+        plt.title('Vertical Position of the Ball over Time')
+        plt.xlabel('Timesteps')
+        plt.ylabel('Vertical Position')
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+    def plot_accumulated_rewards(self):
+        plt.figure(figsize=(10, 6))
+        plt.plot(range(len(self.accumulated_rewards)), self.accumulated_rewards, label='Accumulated Reward')
+        plt.title('Accumulated Reward over Time')
+        plt.xlabel('Timesteps')
+        plt.ylabel('Accumulated Reward')
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+if __name__ == "__main__":
+    env = HandEnv(render_mode="human")
+    check_env(env)  # Check if the environment is valid
+
+    # Define the model
+    model = PPO('MlpPolicy', env, verbose=1)
+
+    # Train the model
+    model.learn(total_timesteps=10000)
+
+    # Save the model
+    model.save("ppo_hand_env")
+
+    # Load the model
+    model = PPO.load("ppo_hand_env")
+
+    obs, _ = env.reset()
+    done = False
+    while not done:
+        action, _states = model.predict(obs)  # Let the model decide the action
+        obs, reward, done, _, _ = env.step(action)
+        env.render()  # Render the environment (optional)
+
+    # Close the environment
+    env.close()
