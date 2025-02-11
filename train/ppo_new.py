@@ -48,7 +48,6 @@ class HandEnv(gym.Env):
         self.observation_space = gym.spaces.Box(low=0, high=255, shape=(480, 640, 3), dtype=np.uint8)
 
         self.dxl_ids = [10, 11, 12, 20, 21, 22, 30, 31, 32] # define idx of motors
-        self.ser = self.initialize_serial(port='COM3', baud_rate=9600)
         self.camera = None
 
         self.cam = BallTracker(buffer_size=64, height_threshold=300, alpha=0.2)
@@ -102,14 +101,17 @@ class HandEnv(gym.Env):
         # move slider using 6th value in action
         self.move_slider(action[6])
 
+        
+        ##############################
         # needs to be done
-        # defining different curriculum 
+        # define different curriculum 
         if self._ij > 999999:   
             rot_weight = 1
             lift_weight = 1
         else:
             rot_weight = 1 
             lift_weight = 1 
+        ##############################
 
         img = self.capture_camera_image()
         frame = self.cam.track_ball(frame)  # Process the frame with the tracker
@@ -117,10 +119,9 @@ class HandEnv(gym.Env):
         lifting_reward, rotation_reward = self.cam.get_rewards()
         reward = lifting_reward * lift_weight + rotation_reward * rot_weight
 
-        done = self.check_done() # needs to be done
         info = {}
 
-        # retrieve force values
+        # retrieve tactile force (FSR) values
         force_D0, force_D1, force_D2 = self.fsr.get_fsr()
         # Combine camera image and FSR data into observation
         observation = {
@@ -129,6 +130,13 @@ class HandEnv(gym.Env):
         }
 
         self.accumulated_rewards.append(reward)
+        self._ij += 1 
+
+        ##############################
+        # needs to be done
+        # define terminate condition
+        done = self.check_done()
+        ##############################
 
         return observation, reward, done, info
 
@@ -159,7 +167,7 @@ class HandEnv(gym.Env):
         cv2.waitKey(1)
 
     def close(self):
-        self.ser.close()
+        self.return_to_initial_state_and_disable_torque()
         portHandler.closePort()
         self.fsr.stop_collection()
         # self.plot_ball_positions()
@@ -168,10 +176,6 @@ class HandEnv(gym.Env):
 ################################################################################################
 # other definition
 ################################################################################################
-
-    def initialize_serial(self, port, baud_rate):
-        ser = serial.Serial(port, baud_rate, timeout=1)
-        return ser
 
     def move_actuators(self, idx, action):
         # map action value to Dynamixel position
@@ -187,15 +191,21 @@ class HandEnv(gym.Env):
                 print("%s" % packetHandler.getRxPacketError(dxl_error))
 
     def move_slider(self, action):
-        def send_command(ser, command):
-            if ser.is_open:
-                command = command + "\n"
-                ser.write(command.encode())
-                ser.flush()
-
         slider_position = np.interp(action, [-1.0, 1.0], [75, 145])
         respond = self.fsr.send_slider_position(slider_position)
         print(respond)
+
+    def return_to_initial_state_and_disable_torque(self):
+        self.move_actuators(np.zeros(6))
+        for id in self.dxl_ids:
+            dxl_comm_result, dxl_error = packetHandler.write1ByteTxRx(portHandler, id, ADDR_TORQUE_ENABLE, TORQUE_DISABLE)
+            if dxl_comm_result != COMM_SUCCESS:
+                print("%s" % packetHandler.getTxRxResult(dxl_comm_result))
+            elif dxl_error != 0:
+                print("%s" % packetHandler.getRxPacketError(dxl_error))
+        if self.camera is not None:
+            self.camera.release()
+        cv2.destroyAllWindows()
 
     def capture_camera_image(self):
         if self.camera is None or not self.camera.isOpened():
@@ -204,6 +214,8 @@ class HandEnv(gym.Env):
         return frame
     
     def check_done(self):
+        if self._ij >= 1000:
+            return True
         return False
 
     def plot_ball_positions(self):
@@ -240,7 +252,7 @@ if __name__ == "__main__":
     model = PPO('MlpPolicy', env, verbose=1)
 
     # Train the model
-    model.learn(total_timesteps=10000)
+    model.learn(total_timesteps=1000)
 
     # Save the model
     model.save("ppo_hand_env")

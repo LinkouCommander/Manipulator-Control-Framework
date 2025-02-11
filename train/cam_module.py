@@ -67,88 +67,95 @@ class BallTracker:
 
     def track_ball(self, frame):
         frame = imutils.resize(frame, width=800)
+        # Apply Gaussian blur and Convert the frame to HSV color space
         blurred = cv2.GaussianBlur(frame, (11, 11), 0)
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
 
-        center, radius = self.get_ball_position(hsv)
-
-        lifting_reward = -3
+        # render of height threshold line
         cv2.line(frame, (0, self.height_threshold), (frame.shape[1], self.height_threshold), (0, 255, 0), 2)
+        lifting_reward = -3
 
+        # find available ball object
+        center, radius = self.get_ball_position(hsv)
         if center is None:
             return frame, lifting_reward, 0
         x, y = center
 
-        if radius < 40:
+        if radius < 40: # Ignore too small detected objects
             return frame, lifting_reward, 0
-        
+
+        # render of ball
         cv2.circle(frame, center, int(radius), (0, 0, 255), 2)
         cv2.circle(frame, center, 5, (0, 0, 255), -1)
 
         def get_mark_position(hsv):
-            # get non red mask
+            # Extract the red color mask to identify non-red regions
             red_mask = self.get_red_mask(hsv)
             red_mask = cv2.erode(red_mask, None, iterations=2)
             red_mask = cv2.dilate(red_mask, None, iterations=2)
             non_red_mask = cv2.bitwise_not(red_mask)
             non_red_mask = cv2.erode(non_red_mask, None, iterations=2)
             non_red_mask = cv2.dilate(non_red_mask, None, iterations=2)
-            # get circular mask
+
+            # Create a circular mask around the detected ball
             circular_mask = np.zeros_like(non_red_mask)
             cv2.circle(circular_mask, center, int(radius), 255, -1)
+
+            # Mask out non-red areas within the ball’s region
             circular_mask_1 = cv2.bitwise_and(non_red_mask, circular_mask)
-            # find white stickers that are within the red ball's radius
+
+            # Detect contours of non-red objects within the ball
             mark_cnts = cv2.findContours(circular_mask_1.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             mark_cnts = imutils.grab_contours(mark_cnts)
 
-            # if mark_cnts is None:
-            #     return None
-
             rect_list = []
-            
+
             for mc in mark_cnts:
                 area = cv2.contourArea(mc)
 
-                # ignore small contours
+                # Ignore small contours
                 if area < 300:
                     continue
-                
-                # Compute the minimum bounding rectangle and extract its integer vertices
+
+                # Compute the minimum bounding rectangle around the contour
                 rect = cv2.minAreaRect(mc)
                 box = cv2.boxPoints(rect)
                 box = np.int0(box)
 
-                # Calculate rectangle are
+                # Calculate rectangle area
                 rect_area = cv2.contourArea(box)
 
-                # Filter out if the ratio of the contour area to the rectangle area is less than min_area_ratio
                 area_ratio = area / rect_area
                 if area_ratio < 0.7:
                     continue
 
+                # render of rectangular markers
                 cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
 
                 rect_list.append(rect)
 
             return rect_list
 
+        # Retrieve the positions of markers on the ball
         rect_list = get_mark_position(hsv)
 
         def miniDistance(point1, point2):
+            # Compute Euclidean distance between two points
             return math.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
 
         def get_angular_velocity(degrees):
-            # 將角度轉換為弧度
+            # Convert angle change to radians
             radians = math.radians(degrees)
-            
-            interval = 1
-            # 計算角速度
-            time_seconds = interval / 30
+
+            # Assume a frame interval of 1/30 seconds
+            time_seconds = 1 / 30
+
+            # Compute angular velocity
             angular_velocity = radians / time_seconds
             return angular_velocity
 
         def calculate_velocity(rect_list, prev_rect_list):
-            nearest_points = []
+            # Dictionary to store the closest previous marker for each current marker
             closest_map = {}
 
             for curr_point in rect_list:
@@ -156,36 +163,35 @@ class BallTracker:
                 closest_point = None
 
                 for prev_point in prev_rect_list:
-                    # print(prev_point[0], curr_point[0])
+                    # Calculate distance between previous and current markers
                     dist = miniDistance(prev_point[0], curr_point[0])
-                    # if dist > 500:
-                    #     continue
+
+                    # Update closest point if a smaller distance is found
                     if dist < min_distance:
                         min_distance = dist
                         closest_point = prev_point
 
-                if closest_point is not None:  # 確保找到了最近的點
-                    # 將 closest_point 轉換為 tuple，以便作為鍵
-                    closest_point_key = tuple(closest_point)  # 將 closest_point 轉為 tuple
-                    
-                    if closest_point_key not in closest_map:
-                        closest_map[closest_point_key] = (curr_point, min_distance)
-                    elif min_distance < closest_map[closest_point_key][1]:
+                if closest_point is not None:
+                    closest_point_key = tuple(closest_point)
+
+                    # Store the closest match if it's not in the map or if it has a smaller distance
+                    if closest_point_key not in closest_map or min_distance < closest_map[closest_point_key][1]:
                         closest_map[closest_point_key] = (curr_point, min_distance)
 
+            # Create pairs of previous and current marker positions
             nearest_points = [(v[0], k) for k, v in closest_map.items()]
 
             total_angular_velocity = 0
-            total_angle = 0
             for (prev_point, curr_point) in nearest_points:
-                total_angle += curr_point[2] - prev_point[2]
                 total_angular_velocity += get_angular_velocity(curr_point[2] - prev_point[2])
 
-            velocity = total_angular_velocity / len(nearest_points)
+            # Compute average angular velocity
+            velocity = total_angular_velocity / len(nearest_points) if nearest_points else 0
             velocity = self.filter.process(velocity)
 
             return velocity
 
+        # Compute angular velocity if markers are detected in both current and previous frames
         if rect_list and self.prev_rect_list:
             velocity = calculate_velocity(rect_list, self.prev_rect_list)
             self.prev_rect_list = rect_list
@@ -196,20 +202,23 @@ class BallTracker:
             self.prev_rect_list = []
             velocity = 0
 
+        # Reward is based on the absolute value of rotation velocity
         rotation_reward = abs(velocity)
 
+        # Compute lifting reward based on distance from threshold height
         distance_to_target = abs(y - self.height_threshold)
         lifting_reward = -distance_to_target / 100
 
+        # Store reward values for tracking
         self.lifting_reward_list.append(lifting_reward)
         self.rotation_reward_list.append(rotation_reward)
         self.counter += 1
 
-        # total_reward = self.rotation_reward_list[-1] * 0.51 - self.lifting_reward_list[-1] * 0.49
-        # self.total_reward_list.append(total_reward)
+        # Store the processed frame
         self.frame = frame
 
         return frame
+
 
     def get_rewards(self):
         return self.lifting_reward_list[-1], self.rotation_reward_list[-1]
