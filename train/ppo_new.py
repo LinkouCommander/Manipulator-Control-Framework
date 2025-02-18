@@ -3,6 +3,8 @@ import numpy as np
 import cv2
 import time
 import matplotlib.pyplot as plt
+import asyncio
+import bleak
 
 import gymnasium as gym
 from dynamixel_sdk import PortHandler, PacketHandler
@@ -12,6 +14,7 @@ from imutils.video import VideoStream
 
 from cam_module import BallTracker
 from fsr_slider_module import FSRSerialReader
+from imu_module import BLEIMUHandler
 
 # DYNAMIXEL Model definition
 MY_DXL = 'X_SERIES'
@@ -50,9 +53,18 @@ class HandEnv(gym.Env):
         self.dxl_ids = [10, 11, 12, 20, 21, 22, 30, 31, 32] # define idx of motors
         self.camera = None
 
+        # initial sensors
+        # start camera
         self.cam = BallTracker(buffer_size=64, height_threshold=300, alpha=0.2)
+        # start fsr & slider
         self.fsr = FSRSerialReader(port='COM4', baudrate=115200, threshold=50)
         self.fsr.start_collection()
+        # start imu
+        self.imu = BLEIMUHandler()
+        debug_code = self.imu.start_imu()
+        if debug_code < 0:
+            exit()
+
         self._ij = 0
 
         self.accumulated_rewards = []
@@ -116,7 +128,8 @@ class HandEnv(gym.Env):
         img = self.capture_camera_image()
         frame = self.cam.track_ball(frame)  # Process the frame with the tracker
 
-        lifting_reward, rotation_reward = self.cam.get_rewards()
+        lifting_reward, _ = self.cam.get_rewards()
+        _, rotation_reward, __ = self.imu.updateIMUData()
         reward = lifting_reward * lift_weight + rotation_reward * rot_weight
 
         info = {}
@@ -170,6 +183,7 @@ class HandEnv(gym.Env):
         self.return_to_initial_state_and_disable_torque()
         portHandler.closePort()
         self.fsr.stop_collection()
+        self.imu.stop_imu()
         # self.plot_ball_positions()
         self.plot_accumulated_rewards()
 
@@ -177,6 +191,7 @@ class HandEnv(gym.Env):
 # other definition
 ################################################################################################
 
+    # move dclaw
     def move_actuators(self, idx, action):
         # map action value to Dynamixel position
         positions = np.interp(action, [-0.4, 0.4], [DXL_MINIMUM_POSITION_VALUE, DXL_MAXIMUM_POSITION_VALUE])
@@ -190,6 +205,7 @@ class HandEnv(gym.Env):
             elif dxl_error != 0:
                 print("%s" % packetHandler.getRxPacketError(dxl_error))
 
+    # move slider
     def move_slider(self, action):
         slider_position = np.interp(action, [-1.0, 1.0], [75, 145])
         respond = self.fsr.send_slider_position(slider_position)
@@ -213,6 +229,7 @@ class HandEnv(gym.Env):
         _, frame = self.camera.read()
         return frame
     
+    # termination func
     def check_done(self):
         if self._ij >= 1000:
             return True

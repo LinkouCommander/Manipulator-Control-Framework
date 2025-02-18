@@ -1,5 +1,5 @@
 import time
-from fsr_class import FSRSerialReader
+from fsr_module import FSRSerialReader
 
 # 初始化 FSRSerialReader
 fsr = FSRSerialReader(port='COM5', baudrate=115200, threshold=50)
