@@ -39,9 +39,9 @@ class FSRSerialReader:
                     self.force_data["A2"].append(force_A2)
                     self.time_data.append(current_time)
                     
-                    self.binary_data["A0"].append(1 if force_A0 > self.threshold else 0)
-                    self.binary_data["A1"].append(1 if force_A1 > self.threshold else 0)
-                    self.binary_data["A2"].append(1 if force_A2 > self.threshold else 0)
+                    self.binary_data["A0"].append(1 if force_A0 > self.threshold else -1)
+                    self.binary_data["A1"].append(1 if force_A1 > self.threshold else -1)
+                    self.binary_data["A2"].append(1 if force_A2 > self.threshold else -1)
                 except ValueError:
                     continue
             # else:
@@ -49,9 +49,9 @@ class FSRSerialReader:
 
     def get_fsr(self):
         return (
-            self.binary_data["A0"][-1] if self.binary_data["A0"] else 0,
-            self.binary_data["A1"][-1] if self.binary_data["A1"] else 0,
-            self.binary_data["A2"][-1] if self.binary_data["A2"] else 0
+            self.binary_data["A0"][-1] if self.binary_data["A0"] else -1,
+            self.binary_data["A1"][-1] if self.binary_data["A1"] else -1,
+            self.binary_data["A2"][-1] if self.binary_data["A2"] else -1
         )
 
     def start_collection(self):
@@ -71,7 +71,7 @@ class FSRSerialReader:
             if 75 <= pos <= 145:
                 with self.ser_lock:
                     self.ser.write(f"{pos}\n".encode('utf-8'))  # Send position to Arduino
-                    # return "success"
+                    return "success"
             else:
                 return "Invalid position. Please enter a value between 75 and 145."
         else:

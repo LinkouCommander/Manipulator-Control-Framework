@@ -4,13 +4,13 @@ import cv2
 import time
 import matplotlib.pyplot as plt
 import asyncio
-import bleak
 
 import gymnasium as gym
 from dynamixel_sdk import PortHandler, PacketHandler
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
 from imutils.video import VideoStream
+from dynamixel_sdk import *  # Uses Dynamixel SDK library
 
 from cam_module import BallTracker
 from fsr_slider_module import FSRSerialReader
@@ -25,8 +25,8 @@ if MY_DXL == 'X_SERIES' or MY_DXL == 'MX_SERIES':
     ADDR_GOAL_POSITION = 116
     ADDR_PRESENT_POSITION = 132
     ADDR_PROFILE_VELOCITY = 112
-    DXL_MINIMUM_POSITION_VALUE = 1900
-    DXL_MAXIMUM_POSITION_VALUE = 2100
+    DXL_MINIMUM_POSITION_VALUE = 1500
+    DXL_MAXIMUM_POSITION_VALUE = 2500
     BAUDRATE = 1000000
 
 PROTOCOL_VERSION = 2.0
@@ -48,7 +48,7 @@ class HandEnv(gym.Env):
         self.render_mode = render_mode
         self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float32)
         # Preprocessing (grayscale conversion or downscaling) could be applied to speed up training
-        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(480, 640, 3), dtype=np.uint8)
+        self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(10,), dtype=np.float32)
 
         self.dxl_ids = [10, 11, 12, 20, 21, 22, 30, 31, 32] # define idx of motors
         self.camera = None
@@ -57,13 +57,13 @@ class HandEnv(gym.Env):
         # start camera
         self.cam = BallTracker(buffer_size=64, height_threshold=300, alpha=0.2)
         # start fsr & slider
-        self.fsr = FSRSerialReader(port='COM4', baudrate=115200, threshold=50)
+        self.fsr = FSRSerialReader(port='COM5', baudrate=115200, threshold=50)
         self.fsr.start_collection()
         # start imu
-        self.imu = BLEIMUHandler()
-        debug_code = self.imu.start_imu()
-        if debug_code < 0:
-            exit()
+        # self.imu = BLEIMUHandler()
+        # debug_code = self.imu.start_imu()
+        # if debug_code < 0:
+        #     exit()
 
         self._ij = 0
 
@@ -73,13 +73,13 @@ class HandEnv(gym.Env):
             print("Failed to open the port")
             self.return_to_initial_state_and_disable_torque()
             quit()
-        # print("Succeeded to open the port")
+        print("Succeeded to open the port")
 
         if not portHandler.setBaudRate(BAUDRATE):
             print("Failed to change the baudrate")
             self.return_to_initial_state_and_disable_torque()
             quit()
-        # print("Succeeded to change the baudrate")
+        print("Succeeded to change the baudrate")
 
         # Enable torque for all motors in the list
         for id in self.dxl_ids:
@@ -88,8 +88,8 @@ class HandEnv(gym.Env):
                 print("%s" % packetHandler.getTxRxResult(dxl_comm_result))
             elif dxl_error != 0:
                 print("%s" % packetHandler.getRxPacketError(dxl_error))
-            # else:
-            #     print(f"Dynamixel ID {id} has been successfully connected")
+            else:
+                print(f"Dynamixel ID {id} has been successfully connected")
 
         # Set the desired velocity for all motors
         desired_velocity = 65
@@ -99,8 +99,8 @@ class HandEnv(gym.Env):
                 print("%s" % packetHandler.getTxRxResult(dxl_comm_result))
             elif dxl_error != 0:
                 print("%s" % packetHandler.getRxPacketError(dxl_error))
-            # else:
-            #     print(f"Dynamixel ID {id} velocity set successfully")
+            else:
+                print(f"Dynamixel ID {id} velocity set successfully")
 
 ################################################################################################
 # main function
@@ -112,7 +112,6 @@ class HandEnv(gym.Env):
         self.move_actuators(idx=idx, action=action[:6])
         # move slider using 6th value in action
         self.move_slider(action[6])
-
         
         ##############################
         # needs to be done
@@ -122,25 +121,25 @@ class HandEnv(gym.Env):
             lift_weight = 1
         else:
             rot_weight = 1 
-            lift_weight = 1 
+            lift_weight = 1
         ##############################
 
         img = self.capture_camera_image()
-        frame = self.cam.track_ball(frame)  # Process the frame with the tracker
+        _ = self.cam.track_ball(img)  # Process the frame with the tracker
 
         lifting_reward, _ = self.cam.get_rewards()
-        _, rotation_reward, __ = self.imu.updateIMUData()
+        # _, rotation_reward, __ = self.imu.updateIMUData()
+        rotation_reward = 0
         reward = lifting_reward * lift_weight + rotation_reward * rot_weight
 
         info = {}
+        truncated = False
 
         # retrieve tactile force (FSR) values
         force_D0, force_D1, force_D2 = self.fsr.get_fsr()
         # Combine camera image and FSR data into observation
-        observation = {
-            "fsr": [force_D0, force_D1, force_D2],  # Use 'vec' for FSR values
-            "img": img,  # Include the image in observation
-        }
+        observation = [*action, force_D0, force_D1, force_D2]
+        observation = np.array(observation, dtype=np.float32)
 
         self.accumulated_rewards.append(reward)
         self._ij += 1 
@@ -151,24 +150,26 @@ class HandEnv(gym.Env):
         done = self.check_done()
         ##############################
 
-        return observation, reward, done, info
+        return observation, reward, done, truncated, info
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)  # Pass the seed to the parent class if necessary
 
         # Implement reset logic here
-        init_pos = [1024, 1536, 2560, 1024, 1536, 2560, 1024, 1536, 2560]
-        self.move_actuators(idx=self.dxl_ids, action=init_pos)  # Move actuators to initial positions
+        init_pos = [500, 1536, 2560, 1024, 1536, 2560, 1024, 1536, 2560]
+        print("reset action: ", init_pos)
+        init_pos = np.interp(init_pos, [DXL_MINIMUM_POSITION_VALUE, DXL_MAXIMUM_POSITION_VALUE], [-1, 1])
+        self.move_actuators(idx=self.dxl_ids, action=[-1, -1, -1, -1, -1, -1, -1, -1, -1])  # Move actuators to initial positions
 
-        # Return initial observation
-        img = self.capture_camera_image()
+        self.move_slider(1)
+
         # retrieve force values
         force_D0, force_D1, force_D2 = self.fsr.get_fsr()
         # Combine camera image and FSR data into observation
-        observation = {
-            "fsr": [force_D0, force_D1, force_D2],  # Use 'vec' for FSR values
-            "img": img,  # Include the image in observation
-        }
+        obs_pos = [v for i, v in enumerate(init_pos) if i not in {0, 3, 6}]
+        
+        observation = [*obs_pos, 1, force_D0, force_D1, force_D2]
+        observation = np.array(observation, dtype=np.float32)
 
         return observation, {}
 
@@ -183,18 +184,18 @@ class HandEnv(gym.Env):
         self.return_to_initial_state_and_disable_torque()
         portHandler.closePort()
         self.fsr.stop_collection()
-        self.imu.stop_imu()
+        # self.imu.stop_imu()
         # self.plot_ball_positions()
         self.plot_accumulated_rewards()
 
 ################################################################################################
-# other definition
+# other function
 ################################################################################################
 
     # move dclaw
     def move_actuators(self, idx, action):
         # map action value to Dynamixel position
-        positions = np.interp(action, [-0.4, 0.4], [DXL_MINIMUM_POSITION_VALUE, DXL_MAXIMUM_POSITION_VALUE])
+        positions = np.interp(action, [-1, 1], [DXL_MINIMUM_POSITION_VALUE, DXL_MAXIMUM_POSITION_VALUE])
         goal_positions = [int(pos) for pos in positions]
 
         # Iterate over the motor IDs and their corresponding goal positions
@@ -208,7 +209,10 @@ class HandEnv(gym.Env):
     # move slider
     def move_slider(self, action):
         slider_position = np.interp(action, [-1.0, 1.0], [75, 145])
+        slider_position = str(int(round(slider_position)))
+        print("slider_position: ", slider_position)
         respond = self.fsr.send_slider_position(slider_position)
+        time.sleep(0.5)
         print(respond)
 
     def return_to_initial_state_and_disable_torque(self):
@@ -265,24 +269,29 @@ if __name__ == "__main__":
     env = HandEnv(render_mode="human")
     check_env(env)  # Check if the environment is valid
 
-    # Define the model
-    model = PPO('MlpPolicy', env, verbose=1)
+    # # Define the model
+    # model = PPO('MlpPolicy', env, verbose=1)
 
-    # Train the model
-    model.learn(total_timesteps=1000)
+    # # Train the model
+    # model.learn(total_timesteps=1000)
 
-    # Save the model
-    model.save("ppo_hand_env")
+    # # Save the model
+    # model.save("ppo_hand_env")
 
-    # Load the model
-    model = PPO.load("ppo_hand_env")
+    # # Load the model
+    # model = PPO.load("ppo_hand_env")
 
-    obs, _ = env.reset()
+    # obs, _ = env.reset()
     done = False
-    while not done:
-        action, _states = model.predict(obs)  # Let the model decide the action
-        obs, reward, done, _, _ = env.step(action)
-        env.render()  # Render the environment (optional)
+    action = env.action_space.sample()
+    print("action: ", action)
+    obs, reward, done, _, _ = env.step(action)
+    # while not done:
+    #     # action, _states = model.predict(obs)  # Let the model decide the action
+    #     action = env.action_space.sample()
+    #     print("random action:", action)
+    #     obs, reward, done, _, _ = env.step(action)
+    #     # env.render()  # Render the environment (optional)
 
     # Close the environment
     env.close()
