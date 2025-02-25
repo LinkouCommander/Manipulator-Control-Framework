@@ -14,7 +14,7 @@ if __name__ == "__main__":
     try:
         while True:
             time.sleep(0.2)  # 每秒獲取一次數據
-            rX, rY, rZ = handler.updateData()
+            rX, rY, rZ = handler.updateIMUData()
             print(f"IMU Data: AsX={rX}, AsY={rY}, AsZ={rZ}")
     except KeyboardInterrupt:
         print("Interrupt")
