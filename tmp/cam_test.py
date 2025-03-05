@@ -13,7 +13,7 @@ def collect_rewards(tracker):
 def main():
     tracker = BallTracker(buffer_size=64, height_threshold=300, alpha=0.2)
     tracker.start_cam()
-    # vs = VideoStream(src=0).start()
+    vs = cv2.VideoCapture(0)
     time.sleep(2.0)  # Allow the camera to warm up
 
     # reward_threading = threading.Thread(target=collect_rewards, args=(tracker,), daemon=True)

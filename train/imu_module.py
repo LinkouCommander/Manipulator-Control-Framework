@@ -12,7 +12,7 @@ class BLEIMUHandler:
     def __init__(self):
         self.devices = []
         self.target_device = None
-        self.user_input = "D1:9D:96:C7:9D:E4"
+        self.user_input = "D1:9D:96:C7:9D:E4" # set target MAC address
         self.imu = None
         self.data_thread = None
 
@@ -20,11 +20,22 @@ class BLEIMUHandler:
     async def scan(self):
         print("Searching for Bluetooth devices......")
         try:
-            self.devices = await bleak.BleakScanner.discover()
-            print("Search ended")
-            for d in self.devices:
-                if d.name is not None and "WT" in d.name:
-                    print(d)
+            while True:
+                self.devices = await bleak.BleakScanner.discover()
+                print("Search ended")
+                for d in self.devices:
+                    if d.name is not None and d.address == self.user_input:
+                        print(self.user_input, "is found")
+                        self.target_device = d.address
+                        return
+
+                    # # could used to find WT sensor
+                    # if d.name is not None and "WT" in d.name:
+                    #     print(d)
+                    #     return
+
+                # Optionally add a delay before starting the next scan iteration
+                await asyncio.sleep(2)  # Adjust delay as necessary
         except Exception as ex:
             print("Bluetooth search failed to start")
             return
@@ -32,10 +43,11 @@ class BLEIMUHandler:
     def start_imu(self):
         # Search Device
         asyncio.run(self.scan())
-        for d in self.devices:
-            if d.address == self.user_input:
-                self.target_device = d.address
-                break
+        # for d in self.devices:
+        #     if d.address == self.user_input:
+        #         self.target_device = d.address
+        #         break
+        time.sleep(1)
         if self.target_device is not None:
             # Create device
             self.imu = DeviceModel("MyBle5.0", self.target_device)
@@ -123,48 +135,51 @@ class DeviceModel:
     # Open device
     async def openDevice(self):
         print("Opening device......")
-        # Obtain the services and characteristic of the device
-        async with bleak.BleakClient(self.mac) as client:
-            self.client = client
-            self.isOpen = True
-            # Device UUID constant
-            target_service_uuid = "0000ffe5-0000-1000-8000-00805f9a34fb"
-            target_characteristic_uuid_read = "0000ffe4-0000-1000-8000-00805f9a34fb"
-            target_characteristic_uuid_write = "0000ffe9-0000-1000-8000-00805f9a34fb"
-            notify_characteristic = None
+        try:
+            # Obtain the services and characteristic of the device
+            async with bleak.BleakClient(self.mac) as client:
+                self.client = client
+                self.isOpen = True
+                # Device UUID constant
+                target_service_uuid = "0000ffe5-0000-1000-8000-00805f9a34fb"
+                target_characteristic_uuid_read = "0000ffe4-0000-1000-8000-00805f9a34fb"
+                target_characteristic_uuid_write = "0000ffe9-0000-1000-8000-00805f9a34fb"
+                notify_characteristic = None
 
-            print("Matching services......")
-            for service in client.services:
-                if service.uuid == target_service_uuid:
-                    print(f"Service: {service}")
-                    print("Matching characteristic......")
-                    for characteristic in service.characteristics:
-                        if characteristic.uuid == target_characteristic_uuid_read:
-                            notify_characteristic = characteristic
-                        if characteristic.uuid == target_characteristic_uuid_write:
-                            self.writer_characteristic = characteristic
-                    if notify_characteristic:
-                        break
+                print("Matching services......")
+                for service in client.services:
+                    if service.uuid == target_service_uuid:
+                        print(f"Service: {service}")
+                        print("Matching characteristic......")
+                        for characteristic in service.characteristics:
+                            if characteristic.uuid == target_characteristic_uuid_read:
+                                notify_characteristic = characteristic
+                            if characteristic.uuid == target_characteristic_uuid_write:
+                                self.writer_characteristic = characteristic
+                        if notify_characteristic:
+                            break
 
-            if notify_characteristic:
-                print(f"Characteristic: {notify_characteristic}")
-                lock_event.set()  # Notify start_imu() can return
+                if notify_characteristic:
+                    print(f"Characteristic: {notify_characteristic}")
+                    lock_event.set()  # Notify start_imu() can return
 
-                # Set up notifications to receive data
-                await client.start_notify(notify_characteristic.uuid, self.onDataReceived)
+                    # Set up notifications to receive data
+                    await client.start_notify(notify_characteristic.uuid, self.onDataReceived)
 
-                # Keep connected and open
-                try:
-                    while self.isOpen:
-                        await asyncio.sleep(1)
-                except asyncio.CancelledError:
-                    pass
-                finally:
-                    # Stop notification on exit
-                    await client.stop_notify(notify_characteristic.uuid)
-            else:
-                print("No matching services or characteristic found")
-                lock_event.set()  # Notify start_imu() can return
+                    # Keep connected and open
+                    try:
+                        while self.isOpen:
+                            await asyncio.sleep(1)
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        # Stop notification on exit
+                        await client.stop_notify(notify_characteristic.uuid)
+                else:
+                    print("No matching services or characteristic found")
+                    lock_event.set()  # Notify start_imu() can return
+        except Exception as ex:
+            print(f"Failed to open device: {ex}")
 
     # Close device
     def closeDevice(self):

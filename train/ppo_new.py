@@ -48,7 +48,7 @@ class HandEnv(gym.Env):
         self.render_mode = render_mode
         self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float32)
         # Preprocessing (grayscale conversion or downscaling) could be applied to speed up training
-        self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(10,), dtype=np.float32)
+        self.observation_space = gym.spaces.Box(low=-4.0, high=4.0, shape=(10,), dtype=np.float32)
 
         self.dxl_ids = [10, 11, 12, 20, 21, 22, 30, 31, 32] # define idx of motors
         self.camera = None
@@ -59,14 +59,17 @@ class HandEnv(gym.Env):
         # start fsr & slider
         self.fsr = FSRSerialReader(port='COM5', baudrate=115200, threshold=50)
         self.fsr.start_collection()
+        time.sleep(1)
         # start imu
-        # self.imu = BLEIMUHandler()
-        # debug_code = self.imu.start_imu()
-        # if debug_code < 0:
-        #     exit()
+        self.imu = BLEIMUHandler()
+        debug_code = self.imu.start_imu()
+        if debug_code < 0:
+            exit()
 
         self._ij = 0
 
+        self.lifting_rewards = []
+        self.rotation_rewards = []
         self.accumulated_rewards = []
 
         if not portHandler.openPort():
@@ -107,12 +110,12 @@ class HandEnv(gym.Env):
 ################################################################################################
 
     def step(self, action):
+        # move slider using 6th value in action
+        self.move_slider(action[6])
         # move dclaw using 0-5th value in action
         idx = [11, 12, 21, 22, 31, 32]
         self.move_actuators(idx=idx, action=action[:6])
-        # move slider using 6th value in action
-        self.move_slider(action[6])
-        
+
         ##############################
         # needs to be done
         # define different curriculum 
@@ -128,8 +131,8 @@ class HandEnv(gym.Env):
         _ = self.cam.track_ball(img)  # Process the frame with the tracker
 
         lifting_reward, _ = self.cam.get_rewards()
-        # _, rotation_reward, __ = self.imu.updateIMUData()
-        rotation_reward = 0
+        x_velocity, y_velocity, z_velocity = self.imu.updateIMUData()
+        rotation_reward = np.sqrt(x_velocity**2 + y_velocity**2 + z_velocity**2)
         reward = lifting_reward * lift_weight + rotation_reward * rot_weight
 
         info = {}
@@ -141,6 +144,8 @@ class HandEnv(gym.Env):
         observation = [*action, force_D0, force_D1, force_D2]
         observation = np.array(observation, dtype=np.float32)
 
+        self.lifting_rewards.append(lifting_reward)
+        self.rotation_rewards.append(rotation_reward)
         self.accumulated_rewards.append(reward)
         self._ij += 1 
 
@@ -156,10 +161,12 @@ class HandEnv(gym.Env):
         super().reset(seed=seed)  # Pass the seed to the parent class if necessary
 
         # Implement reset logic here
-        init_pos = [500, 1536, 2560, 1024, 1536, 2560, 1024, 1536, 2560]
-        print("reset action: ", init_pos)
-        init_pos = np.interp(init_pos, [DXL_MINIMUM_POSITION_VALUE, DXL_MAXIMUM_POSITION_VALUE], [-1, 1])
-        self.move_actuators(idx=self.dxl_ids, action=[-1, -1, -1, -1, -1, -1, -1, -1, -1])  # Move actuators to initial positions
+        init_pos = [1024, 1536, 2560, 1024, 1536, 2560, 1024, 1536, 2560]
+        # print("reset action: ", init_pos)
+        init_pos = self.map_array(init_pos, [DXL_MINIMUM_POSITION_VALUE, DXL_MAXIMUM_POSITION_VALUE], [-1, 1])
+        # print("mapped reset action: ", init_pos)
+
+        self.move_actuators(idx=self.dxl_ids, action=init_pos)  # Move actuators to initial positions
 
         self.move_slider(1)
 
@@ -184,7 +191,7 @@ class HandEnv(gym.Env):
         self.return_to_initial_state_and_disable_torque()
         portHandler.closePort()
         self.fsr.stop_collection()
-        # self.imu.stop_imu()
+        self.imu.stop_imu()
         # self.plot_ball_positions()
         self.plot_accumulated_rewards()
 
@@ -195,7 +202,8 @@ class HandEnv(gym.Env):
     # move dclaw
     def move_actuators(self, idx, action):
         # map action value to Dynamixel position
-        positions = np.interp(action, [-1, 1], [DXL_MINIMUM_POSITION_VALUE, DXL_MAXIMUM_POSITION_VALUE])
+        positions = self.map_array(action, [-1, 1], [DXL_MINIMUM_POSITION_VALUE, DXL_MAXIMUM_POSITION_VALUE])
+        # print(positions)
         goal_positions = [int(pos) for pos in positions]
 
         # Iterate over the motor IDs and their corresponding goal positions
@@ -210,13 +218,13 @@ class HandEnv(gym.Env):
     def move_slider(self, action):
         slider_position = np.interp(action, [-1.0, 1.0], [75, 145])
         slider_position = str(int(round(slider_position)))
-        print("slider_position: ", slider_position)
+        # print("slider_position: ", slider_position)
         respond = self.fsr.send_slider_position(slider_position)
-        time.sleep(0.5)
-        print(respond)
+        time.sleep(2)
+        # print(respond)
 
     def return_to_initial_state_and_disable_torque(self):
-        self.move_actuators(np.zeros(6))
+        # self.move_actuators(np.zeros(6))
         for id in self.dxl_ids:
             dxl_comm_result, dxl_error = packetHandler.write1ByteTxRx(portHandler, id, ADDR_TORQUE_ENABLE, TORQUE_DISABLE)
             if dxl_comm_result != COMM_SUCCESS:
@@ -239,6 +247,20 @@ class HandEnv(gym.Env):
             return True
         return False
 
+    def map_array(self, arr, a, b):
+        # 轉換 arr 為 np.array 以便進行數學運算
+        arr = np.array(arr, dtype=np.float64)
+        
+        # 執行線性映射計算
+        mapped_arr = (arr - a[0]) * (b[1] - b[0]) / (a[1] - a[0]) + b[0]
+        
+        # 如果輸入是單個數值，則回傳單個 float
+        if np.isscalar(arr) or isinstance(arr, (int, float)):
+            return float(mapped_arr)  # 確保返回的是純 Python 數值
+        else:
+            return mapped_arr.tolist()  # 轉回 Python list
+
+
     def plot_ball_positions(self):
         ball_positions = [pos[1] if pos is not None else 0 for pos in self.ball_positions]
         timesteps = range(len(ball_positions))
@@ -256,7 +278,9 @@ class HandEnv(gym.Env):
 
     def plot_accumulated_rewards(self):
         plt.figure(figsize=(10, 6))
-        plt.plot(range(len(self.accumulated_rewards)), self.accumulated_rewards, label='Accumulated Reward')
+        plt.plot(range(len(self.lifting_rewards)), self.lifting_rewards, label='Lifting Reward', color='blue')
+        plt.plot(range(len(self.rotation_rewards)), self.rotation_rewards, label='Rotation Reward', color='orange')
+        plt.plot(range(len(self.accumulated_rewards)), self.accumulated_rewards, label='Accumulated Reward', color='green')
         plt.title('Accumulated Reward over Time')
         plt.xlabel('Timesteps')
         plt.ylabel('Accumulated Reward')
@@ -265,33 +289,36 @@ class HandEnv(gym.Env):
         plt.tight_layout()
         plt.show()
 
+
 if __name__ == "__main__":
     env = HandEnv(render_mode="human")
-    check_env(env)  # Check if the environment is valid
 
-    # # Define the model
-    # model = PPO('MlpPolicy', env, verbose=1)
+    try:
+        check_env(env)  # Check if the environment is valid
 
-    # # Train the model
-    # model.learn(total_timesteps=1000)
+        # # Define the model
+        # model = PPO('MlpPolicy', env, verbose=1)
 
-    # # Save the model
-    # model.save("ppo_hand_env")
+        # # Train the model
+        # model.learn(total_timesteps=1000)
 
-    # # Load the model
-    # model = PPO.load("ppo_hand_env")
+        # # Save the model
+        # model.save("ppo_hand_env")
 
-    # obs, _ = env.reset()
-    done = False
-    action = env.action_space.sample()
-    print("action: ", action)
-    obs, reward, done, _, _ = env.step(action)
-    # while not done:
-    #     # action, _states = model.predict(obs)  # Let the model decide the action
-    #     action = env.action_space.sample()
-    #     print("random action:", action)
-    #     obs, reward, done, _, _ = env.step(action)
-    #     # env.render()  # Render the environment (optional)
+        # # Load the model
+        # model = PPO.load("ppo_hand_env")
 
+        # obs, _ = env.reset()
+        done = False
+        
+        while not done:
+            # action, _states = model.predict(obs)  # Let the model decide the action
+            action = env.action_space.sample()
+            print("random action:", action)
+            obs, reward, done, _, _ = env.step(action)
+            print(obs)
+            # env.render()  # Render the environment (optional)
+    except KeyboardInterrupt:
+        print("Interrupt")
     # Close the environment
     env.close()

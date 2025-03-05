@@ -1,3 +1,0 @@
-In order to ensure that you can master this sample program faster, please carefully read the following info 
-
-This sample program supports WitMotion 6/9-axis tilt sensor
