@@ -55,6 +55,7 @@ class HandEnv(gym.Env):
 
         # initial sensors
         # start camera
+        self.vs = cv2.VideoCapture(0)
         self.cam = BallTracker(buffer_size=64, height_threshold=300, alpha=0.2)
         # start fsr & slider
         self.fsr = FSRSerialReader(port='COM5', baudrate=115200, threshold=50)
@@ -127,16 +128,12 @@ class HandEnv(gym.Env):
             lift_weight = 1
         ##############################
 
-        img = self.capture_camera_image()
-        _ = self.cam.track_ball(img)  # Process the frame with the tracker
+        self.camera_update()
 
         lifting_reward, _ = self.cam.get_rewards()
         x_velocity, y_velocity, z_velocity = self.imu.updateIMUData()
         rotation_reward = np.sqrt(x_velocity**2 + y_velocity**2 + z_velocity**2)
         reward = lifting_reward * lift_weight + rotation_reward * rot_weight
-
-        info = {}
-        truncated = False
 
         # retrieve tactile force (FSR) values
         force_D0, force_D1, force_D2 = self.fsr.get_fsr()
@@ -151,8 +148,10 @@ class HandEnv(gym.Env):
 
         ##############################
         # needs to be done
-        # define terminate condition
+        # define terminate and truncate condition
         done = self.check_done()
+        info = {}
+        truncated = self.check_episode()
         ##############################
 
         return observation, reward, done, truncated, info
@@ -181,8 +180,8 @@ class HandEnv(gym.Env):
         return observation, {}
 
     def render(self, mode='human'):
-        frame = self.capture_camera_image()
-        frame = self.cam.get_frame(frame)
+        self.camera_update()
+        frame = self.cam.get_frame()
 
         cv2.imshow('Camera Output', frame)
         cv2.waitKey(1)
@@ -194,6 +193,7 @@ class HandEnv(gym.Env):
         self.imu.stop_imu()
         # self.plot_ball_positions()
         self.plot_accumulated_rewards()
+        self.vs.stop()
 
 ################################################################################################
 # other function
@@ -235,17 +235,22 @@ class HandEnv(gym.Env):
             self.camera.release()
         cv2.destroyAllWindows()
 
-    def capture_camera_image(self):
-        if self.camera is None or not self.camera.isOpened():
-            self.camera = cv2.VideoCapture(0)
-        _, frame = self.camera.read()
-        return frame
+    def camera_update(self):
+        _, frame = self.vs.read()
+        self.cam.track_ball(frame)  # Process the frame with the tracker
     
     # termination func
     def check_done(self):
         if self._ij >= 1000:
             return True
         return False
+    
+    # truncation func
+    def check_episode(self):
+        if self._ij % 10 == 0:
+            return True
+        return False
+
 
     def map_array(self, arr, a, b):
         # 轉換 arr 為 np.array 以便進行數學運算
@@ -316,7 +321,7 @@ if __name__ == "__main__":
             action = env.action_space.sample()
             print("random action:", action)
             obs, reward, done, _, _ = env.step(action)
-            print(obs)
+            # print(obs)
             # env.render()  # Render the environment (optional)
     except KeyboardInterrupt:
         print("Interrupt")
