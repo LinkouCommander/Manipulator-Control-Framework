@@ -1,8 +1,9 @@
 import asyncio
 import bleak
-from imu_module import BLEIMUHandler
 import threading
 import time
+import test_env
+from module.imu_module import BLEIMUHandler
 
 # 測試
 if __name__ == "__main__":

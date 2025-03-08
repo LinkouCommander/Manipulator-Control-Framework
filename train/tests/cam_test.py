@@ -2,7 +2,9 @@
 import cv2
 import time
 import threading
-from cam_module import BallTracker
+import test_env
+
+from module.cam_module import BallTracker
 
 def collect_rewards(tracker):
     while True:
@@ -36,7 +38,7 @@ def main():
     finally:
         cv2.destroyAllWindows()
         # tracker.stop_cam()
-        vs.stop()
+        vs.release()
 
 if __name__ == "__main__":
     main()

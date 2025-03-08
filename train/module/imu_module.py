@@ -9,10 +9,10 @@ import math
 lock_event = threading.Event()
 
 class BLEIMUHandler:
-    def __init__(self):
+    def __init__(self, target_device):
         self.devices = []
         self.target_device = None
-        self.user_input = "D1:9D:96:C7:9D:E4" # set target MAC address
+        self.user_input = target_device # set target MAC address
         self.imu = None
         self.data_thread = None
 
@@ -22,11 +22,11 @@ class BLEIMUHandler:
         try:
             while True:
                 self.devices = await bleak.BleakScanner.discover()
-                print("Search ended")
+                print("Searching IMU...")
                 for d in self.devices:
                     if d.name is not None and d.address == self.user_input:
-                        print(self.user_input, "is found")
-                        self.target_device = d.address
+                        self.target_device = self.user_input
+                        print(self.user_input, "is found!")
                         return
 
                     # # could used to find WT sensor
@@ -43,11 +43,8 @@ class BLEIMUHandler:
     def start_imu(self):
         # Search Device
         asyncio.run(self.scan())
-        # for d in self.devices:
-        #     if d.address == self.user_input:
-        #         self.target_device = d.address
-        #         break
         time.sleep(1)
+
         if self.target_device is not None:
             # Create device
             self.imu = DeviceModel("MyBle5.0", self.target_device)

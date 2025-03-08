@@ -12,9 +12,9 @@ from stable_baselines3.common.env_checker import check_env
 from imutils.video import VideoStream
 from dynamixel_sdk import *  # Uses Dynamixel SDK library
 
-from cam_module import BallTracker
-from fsr_slider_module import FSRSerialReader
-from imu_module import BLEIMUHandler
+from module.cam_module import BallTracker
+from module.fsr_slider_module import FSRSerialReader
+from module.imu_module import BLEIMUHandler
 
 # DYNAMIXEL Model definition
 MY_DXL = 'X_SERIES'
@@ -60,9 +60,9 @@ class HandEnv(gym.Env):
         # start fsr & slider
         self.fsr = FSRSerialReader(port='COM5', baudrate=115200, threshold=50)
         self.fsr.start_collection()
-        time.sleep(1)
+        # time.sleep(1)
         # start imu
-        self.imu = BLEIMUHandler()
+        self.imu = BLEIMUHandler(target_device = "D1:9D:96:C7:9D:E4")
         debug_code = self.imu.start_imu()
         if debug_code < 0:
             exit()
@@ -125,7 +125,7 @@ class HandEnv(gym.Env):
             lift_weight = 1
         else:
             rot_weight = 1 
-            lift_weight = 1
+            lift_weight = 0
         ##############################
 
         self.camera_update()
@@ -189,11 +189,13 @@ class HandEnv(gym.Env):
     def close(self):
         self.return_to_initial_state_and_disable_torque()
         portHandler.closePort()
-        self.fsr.stop_collection()
-        self.imu.stop_imu()
+        if self.fsr is not None:
+            self.fsr.stop_collection()
+        if self.imu is not None:
+            self.imu.stop_imu()
         # self.plot_ball_positions()
         self.plot_accumulated_rewards()
-        self.vs.stop()
+        self.vs.release()
 
 ################################################################################################
 # other function
@@ -220,7 +222,7 @@ class HandEnv(gym.Env):
         slider_position = str(int(round(slider_position)))
         # print("slider_position: ", slider_position)
         respond = self.fsr.send_slider_position(slider_position)
-        time.sleep(2)
+        time.sleep(1)
         # print(respond)
 
     def return_to_initial_state_and_disable_torque(self):
@@ -293,6 +295,11 @@ class HandEnv(gym.Env):
         plt.legend()
         plt.tight_layout()
         plt.show()
+
+
+################################################################################################
+# 
+################################################################################################
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 import time
-from fsr_module import FSRSerialReader
+import test_env
+from module.fsr_slider_module import FSRSerialReader
 
 # 初始化 FSRSerialReader
 fsr = FSRSerialReader(port='COM5', baudrate=115200, threshold=50)

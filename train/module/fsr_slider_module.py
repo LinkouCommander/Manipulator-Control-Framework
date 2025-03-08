@@ -58,6 +58,7 @@ class FSRSerialReader:
         self.stop_collecting = False
         self.data_thread = threading.Thread(target=self.collect_data)
         self.data_thread.start()
+        time.sleep(1)
     
     def stop_collection(self):
         self.stop_collecting = True
