@@ -1,5 +1,6 @@
 import time
 from dynamixel_sdk import *  # Uses Dynamixel SDK library
+import numpy as np
 
 class DXLHandler:
     # Dynamixel motor control setup
@@ -9,11 +10,14 @@ class DXLHandler:
     ADDR_PROFILE_VELOCITY = 112
     ADDR_TEMPERATURE = 146
     PROTOCOL_VERSION = 2.0
+    DXL_MIN_LIMIT = 0
+    DXL_MAX_LIMIT = 4096
 
     # Motor IDs for the 9 claws
     DXL_IDs = [10, 11, 12, 20, 21, 22, 30, 31, 32]
+    DXL_INIT_POS = [1024, 1536, 2560, 1024, 1536, 2560, 1024, 1536, 2560]
 
-    def __init__(self, device_name, baudrate):
+    def __init__(self, device_name = 'COM4', baudrate = 1000000):
         self.desired_velocity = 65
         self.device_name = device_name
         self.baudrate = baudrate
@@ -26,45 +30,76 @@ class DXLHandler:
         self._set_baudrate()
         
     def start_dxl(self):
-        self.enable_torque()
-        self.set_velocity()
+        self.enable_torque(self.DXL_IDs)
+        self.set_velocity(self.DXL_IDs)
+
+    def stop_dxl(self):
+        self.disable_torque(self.DXL_IDs)
+        self.portHandler.closePort()
 
 ################################################################################################
-# 
+# Main Functions
 ################################################################################################
 
-    # Enable torque for all motors
-    def enable_torque(self):
-        for dxl_id in self.DXL_IDs:
-            self._write_byte(1, dxl_id, self.ADDR_TORQUE_ENABLE, 1)
+    # Enable motor torque
+    def enable_torque(self, ids):
+        for id in ids:
+            self._write_byte(1, id, self.ADDR_TORQUE_ENABLE, 1)
 
-    #   Disable torque for all motors
-    def disable_torque(self):
-        for dxl_id in self.DXL_IDs:
-            self._write_byte(1, dxl_id, self.ADDR_TORQUE_ENABLE, 0)
+    #   Disable motor torque
+    def disable_torque(self, ids):
+        for id in ids:
+            self._write_byte(1, id, self.ADDR_TORQUE_ENABLE, 0)
 
-    # Set the desired velocity for all motors
-    def set_velocity(self):
-        for dxl_id in self.DXL_IDs:
-            self._write_byte(4, dxl_id, self.ADDR_PROFILE_VELOCITY, self.desired_velocity)
+    # Set the desired velocity for motors
+    def set_velocity(self, ids):
+        for id in ids:
+            self._write_byte(4, id, self.ADDR_PROFILE_VELOCITY, self.desired_velocity)
 
-    def read_positions(self):
+    # read position of motor
+    def read_positions(self, ids):
         position_list = {}
-        for dxl_id in self.DXL_IDs:
-            position_list[dxl_id] = self._read_byte(4, dxl_id, self.ADDR_PRESENT_POSITION)
+        for id in ids:
+            position_list[id] = self._read_byte(4, id, self.ADDR_PRESENT_POSITION)
         return position_list
 
-    def read_temperature(self):
+    # read temperature of motor
+    def read_temperature(self, ids=DXL_IDs):
         temperature_list = {}
-        for dxl_id in self.DXL_IDs:
-            temperature_list[dxl_id] = self._read_byte(1, dxl_id, self.ADDR_TEMPERATURE)
+        for id in ids:
+            temperature_list[id] = self._read_byte(1, id, self.ADDR_TEMPERATURE)
         return temperature_list
     
-    def move_to_position(self, dxl_id, destination):
+    # move motors
+    def move_to_position(self, ids, destinations):
+        """
+        Move motors to specified positions.
+
+        :param ids: List of motor IDs to move.
+        :param destinations: List of target positions for the motors.
+        :return: 1 if successful, 0 if timed out, -1 if invalid input.
+        """
+        for i, id in enumerate(ids):
+            if destinations[i] < self.DXL_MIN_LIMIT or destinations[i] > self.DXL_MAX_LIMIT or id not in self.DXL_IDs:
+                return -1
+            self._write_byte(4, id, self.ADDR_GOAL_POSITION, destinations[i])
         
+        start_time = time.time()
+        while True:
+            current_positions = self.read_positions(ids)
+            diff = np.abs(np.array(current_positions) - np.array(destinations))
+            if np.all(diff < 10) or np.any(np.array(current_positions) == -1):
+                print(f"(destination: {destinations}), (current: {current_positions})")
+                return 1
+
+            if time.time() - start_time > 2:
+                return 0
+            
+            time.sleep(0.1)
+
 
 ################################################################################################
-# 
+# Communication Functions
 ################################################################################################
 
     def _open_port(self):

@@ -255,17 +255,17 @@ class HandEnv(gym.Env):
 
 
     def map_array(self, arr, a, b):
-        # 轉換 arr 為 np.array 以便進行數學運算
-        arr = np.array(arr, dtype=np.float64)
-        
-        # 執行線性映射計算
-        mapped_arr = (arr - a[0]) * (b[1] - b[0]) / (a[1] - a[0]) + b[0]
-        
-        # 如果輸入是單個數值，則回傳單個 float
-        if np.isscalar(arr) or isinstance(arr, (int, float)):
-            return float(mapped_arr)  # 確保返回的是純 Python 數值
-        else:
-            return mapped_arr.tolist()  # 轉回 Python list
+            # Convert arr to a NumPy array for mathematical operations
+            arr = np.array(arr, dtype=np.float64)
+            
+            # Perform linear mapping calculation
+            mapped_arr = (arr - a[0]) * (b[1] - b[0]) / (a[1] - a[0]) + b[0]
+            
+            # Return a single float if the input is a single value
+            if np.isscalar(arr) or isinstance(arr, (int, float)):
+                return float(mapped_arr)  # Ensure the return value is a pure Python number
+            else:
+                return mapped_arr.tolist()  # Convert back to a Python list
 
 
     def plot_ball_positions(self):
