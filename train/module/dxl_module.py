@@ -89,7 +89,7 @@ class DXLHandler:
             current_positions = self.read_positions(ids)
             diff = np.abs(np.array(current_positions) - np.array(destinations))
             if np.all(diff < 10) or np.any(np.array(current_positions) == -1):
-                print(f"(destination: {destinations}), (current: {current_positions})")
+                # print(f"(destination: {destinations}), (current: {current_positions})")
                 return 1
 
             if time.time() - start_time > 2:
@@ -104,11 +104,11 @@ class DXLHandler:
 
     def _open_port(self):
         if not self.port_handler.openPort():
-            raise Exception("Failed to open the port")
+            raise Exception("[DXL] Failed to open the port")
 
     def _set_baudrate(self):
         if not self.port_handler.setBaudRate(self.baudrate):
-            raise Exception("Failed to change the baudrate")
+            raise Exception("[DXL] Failed to change the baudrate")
 
     def _write_byte(self, byteNum, dxl_id, address, value):
         if byteNum == 1:

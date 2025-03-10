@@ -34,9 +34,8 @@ if __name__ == "__main__":
                 if pos_code <= 0:
                     reset_code = dxl.move_to_position([dxl.DXL_IDs], [dxl.DXL_INIT_POS])
                     if reset_code <= 0:
-                        raise Exception("DXL is stuck")
-
-            
+                        raise Exception("[DXL] DXL is stuck")
+                print(f"(destination: {position}), (current: {dxl.read_positions([motor_id])})") 
     except Exception as e:
         print(f"An error occurred: {e}")
     except KeyboardInterrupt:
