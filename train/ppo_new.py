@@ -33,19 +33,19 @@ class HandEnv(gym.Env):
         # start camera
         self.vs = None
         self.cam = BallTracker(buffer_size=64, height_threshold=300, alpha=0.2)
-        print("[CAM] cam done")
+        print("[CAM] Camera ready")
         # # start fsr & slider
         self.fsr = FSRSerialReader(port='COM5', baudrate=115200, threshold=50)
         self.fsr.start_collection()
-        print("[FSR] fsr slider done")
+        print("[FSR] FSR Slider ready")
         time.sleep(1)
         self.dxl = DXLHandler(device_name='COM4', baudrate=1000000)
         self.dxl.start_dxl()
-        print("[DXL] dxl done")
+        print("[DXL] DXL ready")
         # start imu
         self.imu = BLEIMUHandler()
         self.imu.start_imu()
-        print("[IMU] imu done")
+        print("[IMU] IMU ready")
 
         self._ij = 0
 
@@ -58,7 +58,7 @@ class HandEnv(gym.Env):
 ################################################################################################
 
     def step(self, action):
-        print("Step Func")
+        print("[Step]")
         truncated = False
 
         # move slider using 6th value in action
@@ -68,13 +68,9 @@ class HandEnv(gym.Env):
         positions = self.map_array(action[:6], [-1, 1], [self.DXL_MINIMUM_POSITION_VALUE, self.DXL_MAXIMUM_POSITION_VALUE])
         positions = [int(x) for x in positions]
         
-        pos_code = self.dxl.move_to_position(idx, positions)
+        pos_code, obs_pos = self.dxl.move_to_position(idx, positions)
         if pos_code <= 0:
             truncated = True
-        # get observation
-        obs_pos = self.dxl.read_positions(idx)
-        if np.any(np.array(obs_pos) == -1):
-            raise Exception("[DXL] Can't read position")
         
         obs_pos = self.map_array(obs_pos, [self.DXL_MINIMUM_POSITION_VALUE, self.DXL_MAXIMUM_POSITION_VALUE], [-1, 1])
         force_D0, force_D1, force_D2 = self.fsr.get_fsr()
@@ -113,31 +109,32 @@ class HandEnv(gym.Env):
         info = {}
         # truncated = self.check_episode()
 
+        print(self.lifting_rewards, self.rotation_rewards)
+
         return observation, reward, done, truncated, info
 
     def reset(self, seed=None, options=None):
+        print("[Reset]")
         super().reset(seed=seed)  # Pass the seed to the parent class if necessary
 
         # self.move_actuators(idx=self.dxl_ids, action=init_pos)  # Move actuators to initial positions
 
-        self.move_slider(0)
-        dxl_code = self.dxl.move_to_position(self.dxl.DXL_IDs, self.dxl.DXL_INIT_POS)
+        dxl_code, obs_pos = self.dxl.move_to_position(self.dxl.DXL_IDs, self.dxl.DXL_INIT_POS)
         if dxl_code <= 0:
-            raise Exception("[DXL] DXL is stuck")
+            raise Exception("[DXL] DXL is stuck or can't read motor position")
+        # time.sleep(0.5)
+
+        slider_init_pos = 0
+        self.move_slider(slider_init_pos)
 
         # retrieve force values
         force_D0, force_D1, force_D2 = self.fsr.get_fsr()
 
-        # read current motor position
-        idx = [11, 12, 21, 22, 31, 32]
-        obs_pos = self.dxl.read_positions(idx)
-        print(obs_pos)
-        if np.any(np.array(obs_pos) == -1):
-            raise Exception("[DXL] Can't read position")
+        # get current motor position
+        obs_pos_of_six_motor = [obs_pos[i] for i in [1,2,4,5,7,8]]
+        obs_pos_of_six_motor = self.map_array(obs_pos_of_six_motor, [self.DXL_MINIMUM_POSITION_VALUE, self.DXL_MAXIMUM_POSITION_VALUE], [-1, 1])
         
-        obs_pos = self.map_array(obs_pos, [self.DXL_MINIMUM_POSITION_VALUE, self.DXL_MAXIMUM_POSITION_VALUE], [-1, 1])
-        
-        observation = [*obs_pos, 1, force_D0, force_D1, force_D2]
+        observation = [*obs_pos_of_six_motor, slider_init_pos, force_D0, force_D1, force_D2]
         observation = np.array(observation, dtype=np.float32)
 
         return observation, {}
@@ -160,6 +157,7 @@ class HandEnv(gym.Env):
             self.vs.release()
         # self.plot_ball_positions()
         # self.plot_accumulated_rewards()
+        print(self.accumulated_rewards)
         
 
 ################################################################################################
@@ -172,7 +170,7 @@ class HandEnv(gym.Env):
         slider_position = str(int(round(slider_position)))
         # print("slider_position: ", slider_position)
         respond = self.fsr.send_slider_position(slider_position)
-        time.sleep(0.5)
+        # time.sleep(0.5)
         # print(respond)
 
     def camera_update(self):
@@ -229,31 +227,32 @@ if __name__ == "__main__":
     env = HandEnv(render_mode="human")
     try:
         check_env(env)  # Check if the environment is valid
+        print("check environment done")
 
-        # # Define the model
-        # model = PPO('MlpPolicy', env, verbose=1)
+        # Define the model
+        model = PPO('MlpPolicy', env, verbose=1)
 
-        # # Train the model
-        # model.learn(total_timesteps=1000)
+        # Train the model
+        model.learn(total_timesteps=1000)
 
-        # # Save the model
-        # model.save("ppo_hand_env")
+        # Save the model
+        model.save("ppo_hand_env")
 
-        # # Load the model
-        # model = PPO.load("ppo_hand_env")
+        # Load the model
+        model = PPO.load("ppo_hand_env")
 
-        # obs, _ = env.reset()
+        obs, _ = env.reset()
         done = False
         
         while not done:
             # action, _states = model.predict(obs)  # Let the model decide the action
             action = env.action_space.sample()
-            print("random action:", action)
+            # print("random action:", action)
             obs, reward, done, truncated, _ = env.step(action)
             if truncated:
                 env.reset()
             # print(obs)
-            # env.render()  # Render the environment (optional)
+            env.render()  # Render the environment (optional)
     except Exception as e:
         print(e)
     except KeyboardInterrupt:

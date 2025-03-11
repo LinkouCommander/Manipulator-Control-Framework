@@ -90,12 +90,12 @@ class DXLHandler:
             current_positions = self.read_positions(ids)
             # print(current_positions, destinations)
             diff = np.abs(np.array(current_positions) - np.array(destinations))
-            if np.all(diff < 10) or np.any(np.array(current_positions) == -1):
+            if np.all(diff < 10) and np.any(np.array(current_positions) != -1):
                 # print(f"(destination: {destinations}), (current: {current_positions})")
-                return 1
+                return 1, current_positions
 
             if time.time() - start_time > 2:
-                return 0
+                return 0, current_positions
             
             time.sleep(0.1)
 

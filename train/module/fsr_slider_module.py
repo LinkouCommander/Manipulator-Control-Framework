@@ -71,7 +71,9 @@ class FSRSerialReader:
             pos = int(pos)
             if 75 <= pos <= 145:
                 with self.ser_lock:
-                    self.ser.write(f"{pos}\n".encode('utf-8'))  # Send position to Arduino
+                    # print("::::")
+                    self.ser.write(f"{pos}\n".encode('utf-8'))  #  Send position to Arduino
+                    # print("????")
                     return "success"
             else:
                 return "Invalid position. Please enter a value between 75 and 145."
