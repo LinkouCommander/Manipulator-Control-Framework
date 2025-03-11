@@ -257,4 +257,5 @@ if __name__ == "__main__":
         print(e)
     except KeyboardInterrupt:
         print("Interrupt")
-    env.close()
+    finally:
+        env.close()
