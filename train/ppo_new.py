@@ -31,20 +31,21 @@ class HandEnv(gym.Env):
 
         # initial sensors
         # start camera
-        self.vs = cv2.VideoCapture(0)
+        self.vs = None
         self.cam = BallTracker(buffer_size=64, height_threshold=300, alpha=0.2)
-        # start fsr & slider
+        print("[CAM] cam done")
+        # # start fsr & slider
         self.fsr = FSRSerialReader(port='COM5', baudrate=115200, threshold=50)
         self.fsr.start_collection()
-        # time.sleep(1)
-        # start imu
-        self.imu = BLEIMUHandler(target_device = "D1:9D:96:C7:9D:E4")
-        debug_code = self.imu.start_imu()
-        if debug_code < 0:
-            raise Exception("[IMU] Failed to open IMU")
-
-        self.dxl = DXLHandler(port='COM4', baudrate=1000000)
+        print("[FSR] fsr slider done")
+        time.sleep(1)
+        self.dxl = DXLHandler(device_name='COM4', baudrate=1000000)
         self.dxl.start_dxl()
+        print("[DXL] dxl done")
+        # start imu
+        self.imu = BLEIMUHandler()
+        self.imu.start_imu()
+        print("[IMU] imu done")
 
         self._ij = 0
 
@@ -57,6 +58,7 @@ class HandEnv(gym.Env):
 ################################################################################################
 
     def step(self, action):
+        print("Step Func")
         truncated = False
 
         # move slider using 6th value in action
@@ -64,17 +66,25 @@ class HandEnv(gym.Env):
         # move dclaw using 0-5th value in action
         idx = [11, 12, 21, 22, 31, 32]
         positions = self.map_array(action[:6], [-1, 1], [self.DXL_MINIMUM_POSITION_VALUE, self.DXL_MAXIMUM_POSITION_VALUE])
-        if self.dxl.move_to_position(idx, positions) <= 0:
+        positions = [int(x) for x in positions]
+        
+        pos_code = self.dxl.move_to_position(idx, positions)
+        if pos_code <= 0:
             truncated = True
-
         # get observation
         obs_pos = self.dxl.read_positions(idx)
+        if np.any(np.array(obs_pos) == -1):
+            raise Exception("[DXL] Can't read position")
+        
+        obs_pos = self.map_array(obs_pos, [self.DXL_MINIMUM_POSITION_VALUE, self.DXL_MAXIMUM_POSITION_VALUE], [-1, 1])
         force_D0, force_D1, force_D2 = self.fsr.get_fsr()
         observation = [*obs_pos, action[6], force_D0, force_D1, force_D2]
         observation = np.array(observation, dtype=np.float32)
 
+        temperature_list = self.dxl.read_temperature()
+        # print(temperature_list)
         # monitor motor temperature
-        if np.any(self.dxl.read_temperature() > 70):
+        if np.any(np.array(temperature_list) == -1):
             return observation, 0, True, False, {}
 
         # define different curriculum
@@ -88,7 +98,7 @@ class HandEnv(gym.Env):
         self.camera_update()
 
         # get reward
-        lifting_reward, _ = self.cam.get_rewards()
+        lifting_reward = self.cam.get_rewards()
         x_velocity, y_velocity, z_velocity = self.imu.updateIMUData()
         rotation_reward = np.sqrt(x_velocity**2 + y_velocity**2 + z_velocity**2)
         reward = lifting_reward * lift_weight + rotation_reward * rot_weight
@@ -110,7 +120,7 @@ class HandEnv(gym.Env):
 
         # self.move_actuators(idx=self.dxl_ids, action=init_pos)  # Move actuators to initial positions
 
-        self.move_slider(1)
+        self.move_slider(0)
         dxl_code = self.dxl.move_to_position(self.dxl.DXL_IDs, self.dxl.DXL_INIT_POS)
         if dxl_code <= 0:
             raise Exception("[DXL] DXL is stuck")
@@ -121,8 +131,11 @@ class HandEnv(gym.Env):
         # read current motor position
         idx = [11, 12, 21, 22, 31, 32]
         obs_pos = self.dxl.read_positions(idx)
+        print(obs_pos)
         if np.any(np.array(obs_pos) == -1):
             raise Exception("[DXL] Can't read position")
+        
+        obs_pos = self.map_array(obs_pos, [self.DXL_MINIMUM_POSITION_VALUE, self.DXL_MAXIMUM_POSITION_VALUE], [-1, 1])
         
         observation = [*obs_pos, 1, force_D0, force_D1, force_D2]
         observation = np.array(observation, dtype=np.float32)
@@ -143,9 +156,11 @@ class HandEnv(gym.Env):
             self.fsr.stop_collection()
         if self.imu is not None:
             self.imu.stop_imu()
+        if self.vs is not None:
+            self.vs.release()
         # self.plot_ball_positions()
-        self.plot_accumulated_rewards()
-        self.vs.release()
+        # self.plot_accumulated_rewards()
+        
 
 ################################################################################################
 # other function
@@ -153,14 +168,16 @@ class HandEnv(gym.Env):
 
     # move slider
     def move_slider(self, action):
-        slider_position = np.interp(action, [-1.0, 1.0], [75, 145])
+        slider_position = np.interp(action, [-1.0, 1.0], [90, 100])
         slider_position = str(int(round(slider_position)))
         # print("slider_position: ", slider_position)
         respond = self.fsr.send_slider_position(slider_position)
-        time.sleep(1)
+        time.sleep(0.5)
         # print(respond)
 
     def camera_update(self):
+        if self.vs is None or not self.vs.isOpened():
+            self.vs = cv2.VideoCapture(0)
         _, frame = self.vs.read()
         self.cam.track_ball(frame)  # Process the frame with the tracker
     
@@ -210,7 +227,6 @@ class HandEnv(gym.Env):
 
 if __name__ == "__main__":
     env = HandEnv(render_mode="human")
-
     try:
         check_env(env)  # Check if the environment is valid
 
@@ -242,5 +258,4 @@ if __name__ == "__main__":
         print(e)
     except KeyboardInterrupt:
         print("Interrupt")
-    # Close the environment
     env.close()

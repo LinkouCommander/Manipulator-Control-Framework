@@ -24,7 +24,7 @@ class DXLHandler:
 
         # Initialize PortHandler and PacketHandler
         self.portHandler = PortHandler(self.device_name)
-        self.packetHandler = PacketHandler(self.baudrate)
+        self.packetHandler = PacketHandler(self.PROTOCOL_VERSION)
 
         self._open_port()
         self._set_baudrate()
@@ -58,16 +58,17 @@ class DXLHandler:
 
     # read position of motor
     def read_positions(self, ids):
-        position_list = {}
+        position_list = []
         for id in ids:
-            position_list[id] = self._read_byte(4, id, self.ADDR_PRESENT_POSITION)
+            position_list.append(self._read_byte(4, id, self.ADDR_PRESENT_POSITION))
+            time.sleep(0.01)
         return position_list
 
     # read temperature of motor
     def read_temperature(self, ids=DXL_IDs):
-        temperature_list = {}
+        temperature_list = []
         for id in ids:
-            temperature_list[id] = self._read_byte(1, id, self.ADDR_TEMPERATURE)
+            temperature_list.append(self._read_byte(1, id, self.ADDR_TEMPERATURE))
         return temperature_list
     
     # move motors
@@ -87,6 +88,7 @@ class DXLHandler:
         start_time = time.time()
         while True:
             current_positions = self.read_positions(ids)
+            # print(current_positions, destinations)
             diff = np.abs(np.array(current_positions) - np.array(destinations))
             if np.all(diff < 10) or np.any(np.array(current_positions) == -1):
                 # print(f"(destination: {destinations}), (current: {current_positions})")
@@ -103,11 +105,11 @@ class DXLHandler:
 ################################################################################################
 
     def _open_port(self):
-        if not self.port_handler.openPort():
+        if not self.portHandler.openPort():
             raise Exception("[DXL] Failed to open the port")
 
     def _set_baudrate(self):
-        if not self.port_handler.setBaudRate(self.baudrate):
+        if not self.portHandler.setBaudRate(self.baudrate):
             raise Exception("[DXL] Failed to change the baudrate")
 
     def _write_byte(self, byteNum, dxl_id, address, value):
@@ -120,15 +122,14 @@ class DXLHandler:
             print("%s" % self.packetHandler.getTxRxResult(dxl_comm_result))
         elif dxl_error != 0:
             print("%s" % self.packetHandler.getRxPacketError(dxl_error))
-        else:
-            print(f"Motor {dxl_id}: Wrote {value} to {address}")
+        # else:
+        #     print(f"Motor {dxl_id}: Wrote {value} to {address}")
 
     def _read_byte(self, byteNum, dxl_id, address):
-        value = -1
         if byteNum == 1:
-            value, dxl_comm_result, dxl_error = self.packetHandler.read1ByteTx(self.portHandler, dxl_id, address)
+            value, dxl_comm_result, dxl_error = self.packetHandler.read1ByteTxRx(self.portHandler, dxl_id, address)
         else:
-            value, dxl_comm_result, dxl_error = self.packetHandler.read4ByteTx(self.portHandler, dxl_id, address)
+            value, dxl_comm_result, dxl_error = self.packetHandler.read4ByteTxRx(self.portHandler, dxl_id, self.ADDR_PRESENT_POSITION)
 
         if dxl_comm_result != COMM_SUCCESS:
             print("%s" % self.packetHandler.getTxRxResult(dxl_comm_result))

@@ -9,8 +9,12 @@ if __name__ == "__main__":
         dxl = DXLHandler()
         dxl.start_dxl()
 
+        # Report initial positions
+        initial_positions = dxl.read_positions(dxl.DXL_IDs)
+        print("Initial motor positions:", initial_positions)
+
         while True:
-            command = input("Commands:\n<motor_id> <position>, \n't'   Check temperatures, \n'-1'   Exit: ").strip()
+            command = input("\nCommands:\n<motor_id> <position>, \n't'   Check temperatures, \n'-1'   Exit\n").strip()
 
             if command.strip() == "-1":
                 break
@@ -32,7 +36,8 @@ if __name__ == "__main__":
 
                 pos_code = dxl.move_to_position([motor_id], [position])
                 if pos_code <= 0:
-                    reset_code = dxl.move_to_position([dxl.DXL_IDs], [dxl.DXL_INIT_POS])
+                    print("damn")
+                    reset_code = dxl.move_to_position(dxl.DXL_IDs, dxl.DXL_INIT_POS)
                     if reset_code <= 0:
                         raise Exception("[DXL] DXL is stuck")
                 print(f"(destination: {position}), (current: {dxl.read_positions([motor_id])})") 

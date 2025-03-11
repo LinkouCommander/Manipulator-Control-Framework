@@ -9,7 +9,7 @@ import math
 lock_event = threading.Event()
 
 class BLEIMUHandler:
-    def __init__(self, target_device):
+    def __init__(self, target_device="C2:CE:D3:39:47:43"):
         self.devices = []
         self.target_device = None
         self.user_input = target_device # set target MAC address
@@ -37,8 +37,8 @@ class BLEIMUHandler:
                 # Optionally add a delay before starting the next scan iteration
                 await asyncio.sleep(2)  # Adjust delay as necessary
         except Exception as ex:
-            print("Bluetooth search failed to start")
-            return
+            print("Error")
+
 
     def start_imu(self):
         # Search Device
@@ -53,10 +53,10 @@ class BLEIMUHandler:
 
             # Wait for openDevice() to complete characteristic check
             lock_event.wait()
-            return 1
         else:
-            print("No Bluetooth device corresponding to Mac address found!!")
-            return -1
+            # print("No Bluetooth device corresponding to Mac address found!!")
+            # return -1
+            raise Exception("[IMU] No Bluetooth device corresponding to Mac address found!!")
 
     def _run_device(self):
         """Start device in a new thread"""
