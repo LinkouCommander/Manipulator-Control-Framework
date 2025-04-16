@@ -1,9 +1,8 @@
-import serial
 import numpy as np
 import cv2
 import time
 import matplotlib.pyplot as plt
-import asyncio
+import concurrent.futures
 
 import gymnasium as gym
 from stable_baselines3 import PPO
@@ -29,35 +28,51 @@ class HandEnv(gym.Env):
 
         self.dxl_ids = [10, 11, 12, 20, 21, 22, 30, 31, 32] # define idx of motors
 
-        start_seq = time.perf_counter()
-
+        start_init = time.perf_counter()
         # ==================================
         # initial sensors
         # ==================================
-        start_seq = time.perf_counter()
 
-        # start camera
-        self.vs = None
-        self.cam = BallTracker(buffer_size=64, height_threshold=300, alpha=0.2)
-        print("[CAM] Camera ready")
-        # # start fsr & slider
-        self.fsr = FSRSerialReader(port='COM4', baudrate=115200, threshold=50)
-        self.fsr.start_collection()
-        print("[FSR] FSR Slider ready")
-        time.sleep(1)
-        self.dxl = DXLHandler(device_name='COM3', baudrate=1000000)
-        self.dxl.start_dxl()
-        print("[DXL] DXL ready")
-        # start imu
-        self.imu = BLEIMUHandler()
-        self.imu.start_imu()
-        print("[IMU] IMU ready")
+        start_parallel = time.perf_counter()
 
-        end_seq = time.perf_counter()
-        print(f"[SEQUENTIAL] Total init time: {end_seq - start_seq:.2f} seconds")
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = {
+                "cam": executor.submit(self.init_cam),
+                "fsr": executor.submit(self.init_fsr),
+                "dxl": executor.submit(self.init_dxl),
+                "imu": executor.submit(self.init_imu)
+            }
+            results = {name: future.result() for name, future in futures.items()}
+
+        self.cam = results["cam"]
+        self.fsr = results["fsr"]
+        self.dxl = results["dxl"]
+        self.imu = results["imu"]
+
+        print("[SYSTEM] All sensors initialized. Continue main program.")
+
+        # # start camera
+        # self.vs = None
+        # self.cam = BallTracker(buffer_size=64, height_threshold=300, alpha=0.2)
+        # print("[CAM] Camera ready")
+        # # # start fsr & slider
+        # self.fsr = FSRSerialReader(port='COM4', baudrate=115200, threshold=50)
+        # self.fsr.start_collection()
+        # print("[FSR] FSR Slider ready")
+        # time.sleep(1)
+        # self.dxl = DXLHandler(device_name='COM3', baudrate=1000000)
+        # self.dxl.start_dxl()
+        # print("[DXL] DXL ready")
+        # # start imu
+        # self.imu = BLEIMUHandler()
+        # self.imu.start_imu()
+        # print("[IMU] IMU ready")
         
         # ==================================
         # ==================================
+        end_init = time.perf_counter()
+        print(f"[SEQUENTIAL] Total init time: {end_init - start_init:.2f} seconds")
+
 
         self._ij = 0
 
@@ -231,6 +246,33 @@ class HandEnv(gym.Env):
         plt.legend()
         plt.tight_layout()
         plt.show()
+
+################################################################################################
+# initial function
+################################################################################################
+
+    def init_cam(self):
+        cam = BallTracker(buffer_size=64, height_threshold=300, alpha=0.2)
+        print("[CAM] Camera ready")
+        return cam
+
+    def init_fsr(self):
+        fsr = FSRSerialReader(port='COM5', baudrate=115200, threshold=50)
+        fsr.start_collection()
+        print("[FSR] FSR Slider ready")
+        return fsr
+
+    def init_dxl(self):
+        dxl = DXLHandler(device_name='COM4', baudrate=1000000)
+        dxl.start_dxl()
+        print("[DXL] DXL ready")
+        return dxl
+
+    def init_imu(self):
+        imu = BLEIMUHandler()
+        imu.start_imu()
+        print("[IMU] IMU ready")
+        return imu
 
 
 ################################################################################################
