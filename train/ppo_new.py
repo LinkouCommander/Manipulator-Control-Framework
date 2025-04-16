@@ -16,8 +16,8 @@ from module.imu_module import BLEIMUHandler
 from module.dxl_module import DXLHandler
 
 class HandEnv(gym.Env):
-    DXL_MINIMUM_POSITION_VALUE = 1500
-    DXL_MAXIMUM_POSITION_VALUE = 2500
+    DXL_MINIMUM_POSITION_VALUE = 1800
+    DXL_MAXIMUM_POSITION_VALUE = 2200
 
     def __init__(self, render_mode='human'):
         super(HandEnv, self).__init__()
@@ -29,23 +29,35 @@ class HandEnv(gym.Env):
 
         self.dxl_ids = [10, 11, 12, 20, 21, 22, 30, 31, 32] # define idx of motors
 
+        start_seq = time.perf_counter()
+
+        # ==================================
         # initial sensors
+        # ==================================
+        start_seq = time.perf_counter()
+
         # start camera
         self.vs = None
         self.cam = BallTracker(buffer_size=64, height_threshold=300, alpha=0.2)
         print("[CAM] Camera ready")
         # # start fsr & slider
-        self.fsr = FSRSerialReader(port='COM5', baudrate=115200, threshold=50)
+        self.fsr = FSRSerialReader(port='COM4', baudrate=115200, threshold=50)
         self.fsr.start_collection()
         print("[FSR] FSR Slider ready")
         time.sleep(1)
-        self.dxl = DXLHandler(device_name='COM4', baudrate=1000000)
+        self.dxl = DXLHandler(device_name='COM3', baudrate=1000000)
         self.dxl.start_dxl()
         print("[DXL] DXL ready")
         # start imu
         self.imu = BLEIMUHandler()
         self.imu.start_imu()
         print("[IMU] IMU ready")
+
+        end_seq = time.perf_counter()
+        print(f"[SEQUENTIAL] Total init time: {end_seq - start_seq:.2f} seconds")
+        
+        # ==================================
+        # ==================================
 
         self._ij = 0
 
@@ -62,7 +74,7 @@ class HandEnv(gym.Env):
         truncated = False
 
         # move slider using 6th value in action
-        self.move_slider(action[6])
+        # self.move_slider(action[6])
         # move dclaw using 0-5th value in action
         idx = [11, 12, 21, 22, 31, 32]
         positions = self.map_array(action[:6], [-1, 1], [self.DXL_MINIMUM_POSITION_VALUE, self.DXL_MAXIMUM_POSITION_VALUE])
@@ -74,6 +86,7 @@ class HandEnv(gym.Env):
         
         obs_pos = self.map_array(obs_pos, [self.DXL_MINIMUM_POSITION_VALUE, self.DXL_MAXIMUM_POSITION_VALUE], [-1, 1])
         force_D0, force_D1, force_D2 = self.fsr.get_fsr()
+        # print(force_D0, force_D1, force_D2)
         observation = [*obs_pos, action[6], force_D0, force_D1, force_D2]
         observation = np.array(observation, dtype=np.float32)
 
@@ -109,7 +122,7 @@ class HandEnv(gym.Env):
         info = {}
         # truncated = self.check_episode()
 
-        print(self.lifting_rewards, self.rotation_rewards)
+        print(lifting_reward, rotation_reward)
 
         return observation, reward, done, truncated, info
 
@@ -117,14 +130,16 @@ class HandEnv(gym.Env):
         print("[Reset]")
         super().reset(seed=seed)  # Pass the seed to the parent class if necessary
 
-        # self.move_actuators(idx=self.dxl_ids, action=init_pos)  # Move actuators to initial positions
+        self.dxl.disable_torque(self.dxl_ids)
+        time.sleep(0.5)
+        self.dxl.enable_torque(self.dxl_ids)
 
         dxl_code, obs_pos = self.dxl.move_to_position(self.dxl.DXL_IDs, self.dxl.DXL_INIT_POS)
         if dxl_code <= 0:
             raise Exception("[DXL] DXL is stuck or can't read motor position")
         # time.sleep(0.5)
 
-        slider_init_pos = 0
+        slider_init_pos = 1
         self.move_slider(slider_init_pos)
 
         # retrieve force values
@@ -157,7 +172,7 @@ class HandEnv(gym.Env):
             self.vs.release()
         # self.plot_ball_positions()
         # self.plot_accumulated_rewards()
-        print(self.accumulated_rewards)
+        # print(self.accumulated_rewards)
         
 
 ################################################################################################
@@ -166,7 +181,7 @@ class HandEnv(gym.Env):
 
     # move slider
     def move_slider(self, action):
-        slider_position = np.interp(action, [-1.0, 1.0], [90, 100])
+        slider_position = np.interp(action, [-1.0, 1.0], [80, 140])
         slider_position = str(int(round(slider_position)))
         # print("slider_position: ", slider_position)
         respond = self.fsr.send_slider_position(slider_position)

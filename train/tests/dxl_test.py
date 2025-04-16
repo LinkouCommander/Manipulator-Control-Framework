@@ -6,7 +6,7 @@ from module.dxl_module import DXLHandler
 
 if __name__ == "__main__":
     try:
-        dxl = DXLHandler()
+        dxl = DXLHandler(device_name='COM3', baudrate=1000000)
         dxl.start_dxl()
 
         # Report initial positions
@@ -34,10 +34,10 @@ if __name__ == "__main__":
                     print("Invalid position")
                     continue
 
-                pos_code = dxl.move_to_position([motor_id], [position])
+                pos_code, cur_pos = dxl.move_to_position([motor_id], [position])
                 if pos_code <= 0:
                     print("damn")
-                    reset_code = dxl.move_to_position(dxl.DXL_IDs, dxl.DXL_INIT_POS)
+                    reset_code, cur_pos = dxl.move_to_position(dxl.DXL_IDs, dxl.DXL_INIT_POS)
                     if reset_code <= 0:
                         raise Exception("[DXL] DXL is stuck")
                 print(f"(destination: {position}), (current: {dxl.read_positions([motor_id])})") 

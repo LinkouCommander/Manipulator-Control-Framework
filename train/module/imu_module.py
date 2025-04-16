@@ -7,6 +7,7 @@ import threading
 import math
 
 lock_event = threading.Event()
+error_code = True
 
 class BLEIMUHandler:
     def __init__(self, target_device="C2:CE:D3:39:47:43"):
@@ -53,9 +54,9 @@ class BLEIMUHandler:
 
             # Wait for openDevice() to complete characteristic check
             lock_event.wait()
+            if(error_code):
+                raise Exception("[IMU] Failed to run openDevice()")
         else:
-            # print("No Bluetooth device corresponding to Mac address found!!")
-            # return -1
             raise Exception("[IMU] No Bluetooth device corresponding to Mac address found!!")
 
     def _run_device(self):
@@ -158,6 +159,7 @@ class DeviceModel:
 
                 if notify_characteristic:
                     print(f"Characteristic: {notify_characteristic}")
+                    error_code = False
                     lock_event.set()  # Notify start_imu() can return
 
                     # Set up notifications to receive data
@@ -177,6 +179,8 @@ class DeviceModel:
                     lock_event.set()  # Notify start_imu() can return
         except Exception as ex:
             print(f"Failed to open device: {ex}")
+            # add terminate policy
+            lock_event.set()
 
     # Close device
     def closeDevice(self):

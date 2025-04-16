@@ -3,7 +3,7 @@ import test_env
 from module.fsr_slider_module import FSRSerialReader
 
 # 初始化 FSRSerialReader
-fsr = FSRSerialReader(port='COM5', baudrate=115200, threshold=50)
+fsr = FSRSerialReader(port='COM4', baudrate=115200, threshold=50)
 
 # 啟動數據收集
 fsr.start_collection()
