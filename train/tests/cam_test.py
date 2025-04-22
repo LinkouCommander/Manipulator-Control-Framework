@@ -13,7 +13,7 @@ def collect_rewards(tracker):
         print("Reward:", total_rewards, ", Lifting Reward:", lifting_rewards, ", Rotation Reward:", rotation_rewards)
 
 def main():
-    vs = cv2.VideoCapture(0)
+    vs = cv2.VideoCapture(1)
     tracker = BallTracker(buffer_size=64, height_threshold=300, alpha=0.2)
 
     # tracker.start_cam()

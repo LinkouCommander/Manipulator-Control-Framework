@@ -7,6 +7,7 @@ import concurrent.futures
 import gymnasium as gym
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
+from stable_baselines3.common.callbacks import StopTrainingOnEpisodes
 from imutils.video import VideoStream
 
 from module.cam_module import BallTracker
@@ -32,8 +33,9 @@ class HandEnv(gym.Env):
         # ==================================
         # initial sensors
         # ==================================
-
-        start_parallel = time.perf_counter()
+        self.vs = None
+        results = {}
+        errors = {}
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = {
@@ -42,7 +44,11 @@ class HandEnv(gym.Env):
                 "dxl": executor.submit(self.init_dxl),
                 "imu": executor.submit(self.init_imu)
             }
-            results = {name: future.result() for name, future in futures.items()}
+            for name, future in futures.items():
+                try:
+                    results[name] = future.result()
+                except Exception as e:
+                    raise RuntimeError(e)
 
         self.cam = results["cam"]
         self.fsr = results["fsr"]
@@ -80,12 +86,14 @@ class HandEnv(gym.Env):
         self.rotation_rewards = []
         self.accumulated_rewards = []
 
+        self.episode_rewards = 0
+
 ################################################################################################
 # main function
 ################################################################################################
 
     def step(self, action):
-        print("[Step]")
+        print(f"[Step] >>> {self._ij:2d}")
         truncated = False
 
         # move slider using 6th value in action
@@ -98,6 +106,8 @@ class HandEnv(gym.Env):
         pos_code, obs_pos = self.dxl.move_to_position(idx, positions)
         if pos_code <= 0:
             truncated = True
+
+        # obs_pos = self.dxl.read_positions(idx)
         
         obs_pos = self.map_array(obs_pos, [self.DXL_MINIMUM_POSITION_VALUE, self.DXL_MAXIMUM_POSITION_VALUE], [-1, 1])
         force_D0, force_D1, force_D2 = self.fsr.get_fsr()
@@ -116,8 +126,8 @@ class HandEnv(gym.Env):
             rot_weight = 1
             lift_weight = 1
         else:
-            rot_weight = 1
-            lift_weight = 0
+            rot_weight = 0
+            lift_weight = 1
 
         self.camera_update()
 
@@ -127,23 +137,33 @@ class HandEnv(gym.Env):
         rotation_reward = np.sqrt(x_velocity**2 + y_velocity**2 + z_velocity**2)
         reward = lifting_reward * lift_weight + rotation_reward * rot_weight
 
+        self.render()
+
         self.lifting_rewards.append(lifting_reward)
         self.rotation_rewards.append(rotation_reward)
         self.accumulated_rewards.append(reward)
         self._ij += 1 
 
+        self.episode_rewards += reward
+
         # define terminate and truncate condition
         done = self.check_done()
         info = {}
-        # truncated = self.check_episode()
+        truncated = self.check_episode()
 
-        print(lifting_reward, rotation_reward)
+        print(f"""Lift     : {lifting_reward:.3f}
+Rotation : {rotation_reward:.3f}
+FSR : {force_D0:.3f}, {force_D1:.3f}, {force_D2:.3f}
+""")
 
         return observation, reward, done, truncated, info
 
     def reset(self, seed=None, options=None):
         print("[Reset]")
         super().reset(seed=seed)  # Pass the seed to the parent class if necessary
+
+        self._ij = 0
+        self.episode_rewards = 0
 
         self.dxl.disable_torque(self.dxl_ids)
         time.sleep(0.5)
@@ -177,6 +197,7 @@ class HandEnv(gym.Env):
         cv2.waitKey(1)
 
     def close(self):
+        self.fsr.plot_data()
         if self.dxl is not None:
             self.dxl.stop_dxl()
         if self.fsr is not None:
@@ -205,19 +226,19 @@ class HandEnv(gym.Env):
 
     def camera_update(self):
         if self.vs is None or not self.vs.isOpened():
-            self.vs = cv2.VideoCapture(0)
+            self.vs = cv2.VideoCapture(1)
         _, frame = self.vs.read()
         self.cam.track_ball(frame)  # Process the frame with the tracker
     
     # termination func
     def check_done(self):
-        if self._ij >= 1000:
+        if self.episode_rewards >= -20:
             return True
         return False
     
     # truncation func
     def check_episode(self):
-        if self._ij % 10 == 0:
+        if self._ij > 20:
             return True
         return False
 
@@ -257,13 +278,13 @@ class HandEnv(gym.Env):
         return cam
 
     def init_fsr(self):
-        fsr = FSRSerialReader(port='COM5', baudrate=115200, threshold=50)
+        fsr = FSRSerialReader(port='COM4', baudrate=115200, threshold=50)
         fsr.start_collection()
         print("[FSR] FSR Slider ready")
         return fsr
 
     def init_dxl(self):
-        dxl = DXLHandler(device_name='COM4', baudrate=1000000)
+        dxl = DXLHandler(device_name='COM3', baudrate=1000000)
         dxl.start_dxl()
         print("[DXL] DXL ready")
         return dxl
@@ -289,8 +310,9 @@ if __name__ == "__main__":
         # Define the model
         model = PPO('MlpPolicy', env, verbose=1)
 
+        print("start training model")
         # Train the model
-        model.learn(total_timesteps=1000)
+        model.learn(total_timesteps=1_000_000, callback=stop_callback)
 
         # Save the model
         model.save("ppo_hand_env")
@@ -301,6 +323,8 @@ if __name__ == "__main__":
         obs, _ = env.reset()
         done = False
         
+        print("start test the trained model")
+
         while not done:
             # action, _states = model.predict(obs)  # Let the model decide the action
             action = env.action_space.sample()

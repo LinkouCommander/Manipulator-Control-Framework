@@ -90,7 +90,7 @@ class DXLHandler:
             current_positions = self.read_positions(ids)
             # print(current_positions, destinations)
             diff = np.abs(np.array(current_positions) - np.array(destinations))
-            if np.all(diff < 10) and np.any(np.array(current_positions) != -1):
+            if np.all(diff < 50) and np.any(np.array(current_positions) != -1):
                 # print(f"(destination: {destinations}), (current: {current_positions})")
                 return 1, current_positions
 
@@ -119,9 +119,9 @@ class DXLHandler:
             dxl_comm_result, dxl_error = self.packetHandler.write4ByteTxRx(self.portHandler, dxl_id, address, value)
 
         if dxl_comm_result != COMM_SUCCESS:
-            print(f"[ERROR] Comm failed (write) - ID: {dxl_id}, Addr: {address}, Value: {value}, Msg: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
+            print(f"[DXL] Comm failed (write) - ID: {dxl_id}, Addr: {address}, Value: {value}, Msg: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
         elif dxl_error != 0:
-            print(f"[ERROR] DXL error (write) - ID: {dxl_id}, Addr: {address}, Value: {value}, Msg: {self.packetHandler.getRxPacketError(dxl_error)}")
+            print(f"[DXL] DXL error (write) - ID: {dxl_id}, Addr: {address}, Value: {value}, Msg: {self.packetHandler.getRxPacketError(dxl_error)}")
         # else:
         #     print(f"Motor {dxl_id}: Wrote {value} to {address}")
 
@@ -133,11 +133,11 @@ class DXLHandler:
 
         if dxl_comm_result != COMM_SUCCESS:
             # print("%s" % self.packetHandler.getTxRxResult(dxl_comm_result))
-            print(f"[ERROR] Comm failed (read) - ID: {dxl_id}, Addr: {address}, Msg: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
+            print(f"[DXL] Comm failed (read) - ID: {dxl_id}, Addr: {address}, Msg: {self.packetHandler.getTxRxResult(dxl_comm_result)}")
             return -1
         elif dxl_error != 0:
             # print("%s" % self.packetHandler.getRxPacketError(dxl_error))
-            print(f"[ERROR] DXL error (read) - ID: {dxl_id}, Addr: {address}, Msg: {self.packetHandler.getRxPacketError(dxl_error)}")
+            print(f"[DXL] DXL error (read) - ID: {dxl_id}, Addr: {address}, Msg: {self.packetHandler.getRxPacketError(dxl_error)}")
             return -1
         else:
             return value

@@ -132,6 +132,7 @@ class DeviceModel:
 
     # Open device
     async def openDevice(self):
+        global error_code
         print("Opening device......")
         try:
             # Obtain the services and characteristic of the device
