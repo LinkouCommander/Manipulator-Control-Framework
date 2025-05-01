@@ -10,7 +10,17 @@ lock_event = threading.Event()
 error_code = True
 
 class BLEIMUHandler:
+    """
+    A handler for managing Bluetooth Low Energy (BLE) IMU devices.
+    Handles scanning, connection, data retrieval, and safe shutdown.
+    """
     def __init__(self, target_device="C2:CE:D3:39:47:43"):
+        """
+        Initializes the BLEIMUHandler.
+
+        Args:
+            target_device (str): The MAC address of the target IMU device.
+        """
         self.devices = []
         self.target_device = None
         self.user_input = target_device # set target MAC address
@@ -19,6 +29,10 @@ class BLEIMUHandler:
 
     # Scan Bluetooth devices and filter names
     async def scan(self):
+        """
+        Scans for IMU devices until the target device is found.
+        Sets `self.target_device` when a match is found.
+        """
         print("Searching for Bluetooth devices......")
         try:
             while True:
@@ -30,29 +44,36 @@ class BLEIMUHandler:
                         print(self.user_input, "is found!")
                         return
 
-                    # # could used to find WT sensor
+                    # Debug option to print matching names
                     # if d.name is not None and "WT" in d.name:
                     #     print(d)
                     #     return
 
-                # Optionally add a delay before starting the next scan iteration
-                await asyncio.sleep(2)  # Adjust delay as necessary
+                await asyncio.sleep(2)  # Delay before next scan attempt
         except Exception as ex:
-            print("Error")
+            print("Error during Bluetooth scanning:")
 
 
     def start_imu(self):
+        """
+        Starts the BLE IMU by scanning and initializing the connection in a background thread.
+
+        Raises:
+            Exception: If device not found or fails to open.
+        """
         # Search Device
         asyncio.run(self.scan())
-        time.sleep(1)
+        time.sleep(1) # Allow scan time to finalize
 
         if self.target_device is not None:
-            # Create device
+            # Create BLE device object
             self.imu = DeviceModel("MyBle5.0", self.target_device)
+
+            # Run device setup in background thread
             self.data_thread = threading.Thread(target=self._run_device)
             self.data_thread.start()
 
-            # Wait for openDevice() to complete characteristic check
+            # Wait until device is ready
             lock_event.wait()
             if(error_code):
                 raise Exception("[IMU] Failed to run openDevice()")
@@ -60,13 +81,21 @@ class BLEIMUHandler:
             raise Exception("[IMU] No Bluetooth device corresponding to Mac address found!!")
 
     def _run_device(self):
-        """Start device in a new thread"""
+        """
+        Private helper method that starts the device loop in a separate thread.
+        """
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(self.imu.openDevice())
 
     def updateIMUData(self):
-        """Get data from IMU device"""
+        """
+        Retrieves the current IMU data from the BLE device.
+
+        Returns:
+            tuple: Angular velocity in radians for axes (AsX, AsY, AsZ).
+                   Returns (0, 0, 0) if no data found.
+        """
         if self.imu:
             return (
                 self.imu.get("AsX") * (math.pi / 180) if self.imu.get("AsX") else 0,
@@ -77,6 +106,9 @@ class BLEIMUHandler:
             return (0, 0, 0)  # Return 0 if no IMU
         
     def stop_imu(self):
+        """
+        Safely stops the IMU device and joins the background data thread.
+        """
         if self.imu is not None:
             self.imu.closeDevice()
         if self.data_thread:

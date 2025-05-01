@@ -2,29 +2,23 @@ from collections import deque
 import numpy as np
 import cv2
 import imutils
-import time
 import matplotlib.pyplot as plt
-import math
-from scipy.signal import medfilt
-import threading
-
-class RealTimeIIR:
-    def __init__(self, alpha=0.6):
-        self.alpha = alpha
-        self.last_output = None
-
-    def process(self, new_value):
-        if self.last_output is None:
-            self.last_output = new_value
-        else:
-            self.last_output = self.alpha * new_value + (1 - self.alpha) * self.last_output
-        return self.last_output
 
 class BallTracker:
+    """
+    A class for detecting and tracking a red ball in a video frame, computing a lifting reward based on vertical movement.
+
+    Attributes:
+        height_threshold (int): Y-coordinate used as the lifting reference line.
+        lifting_reward_list (list): History of lifting rewards.
+        velocities (list): Placeholder for future velocity tracking (not currently used).
+        angles (list): Placeholder for future angle tracking (not currently used).
+        frame (np.ndarray): Last processed frame with overlays.
+        lifting_reward (float): Most recent lifting reward.
+    """
     def __init__(self, buffer_size=64, height_threshold=300, alpha=0.2):
         self.pts = deque(maxlen=buffer_size)
         self.height_threshold = height_threshold
-        self.filter = RealTimeIIR(alpha=alpha)
         self.lifting_reward_list = []
         self.velocities = []
         self.angles = []
@@ -32,6 +26,15 @@ class BallTracker:
         self.lifting_reward = 0
 
     def get_ball_position(self, frame):
+        """
+        Detect the largest red ball-like contour in the frame.
+
+        Args:
+            frame (np.ndarray): The HSV-processed image.
+
+        Returns:
+            tuple: (center, radius) of the detected ball, or (None, None) if not found.
+        """
         mask = self.get_red_mask(frame)
         mask = cv2.erode(mask, None, iterations=2)
         mask = cv2.dilate(mask, None, iterations=2)
@@ -47,6 +50,15 @@ class BallTracker:
             return None, None
 
     def get_red_mask(self, hsv_frame):
+        """
+        Create a mask for detecting red color in HSV space.
+
+        Args:
+            hsv_frame (np.ndarray): HSV-converted image.
+
+        Returns:
+            np.ndarray: Binary mask isolating red regions.
+        """
         lower_red1 = np.array([0, 50, 50])
         upper_red1 = np.array([15, 255, 255])
         lower_red2 = np.array([170, 50, 50])
@@ -57,12 +69,13 @@ class BallTracker:
 
         return cv2.bitwise_or(mask1, mask2)
 
-    def get_mark_mask(self, hsv_frame):
-        lower = np.array([0, 0, 155])
-        upper = np.array([180, 30, 255])
-        return cv2.inRange(hsv_frame, lower, upper)
-
     def track_ball(self, frame):
+        """
+        Track the ball in the frame and compute lifting reward based on its vertical position.
+
+        Args:
+            frame (np.ndarray): BGR image from camera feed.
+        """
         frame = imutils.resize(frame, width=800)
         # Apply Gaussian blur and Convert the frame to HSV color space
         blurred = cv2.GaussianBlur(frame, (11, 11), 0)
@@ -97,17 +110,22 @@ class BallTracker:
         self.frame = frame
 
     def get_rewards(self):
+        """
+        Get the latest computed lifting reward.
+
+        Returns:
+            float: Last reward, or -3 if no reward was computed yet.
+        """
         return self.lifting_reward_list[-1] if self.lifting_reward_list else -3
-        # return self.lifting_reward if self.lifting_reward else -3
     
     def get_frame(self):
-        return self.frame
+        """
+        Get the most recent frame with annotations.
 
-    def start_cam(self):
-        self.stop_collecting = False
-    
-    def stop_cam(self):
-        self.stop_collecting = True
+        Returns:
+            np.ndarray: The last processed frame with overlays.
+        """
+        return self.frame
 
     def plot_results(self):
         plt.figure(figsize=(10, 5))
