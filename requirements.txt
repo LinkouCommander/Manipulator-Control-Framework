@@ -1,0 +1,9 @@
+gymnasium
+numpy
+opencv-python
+matplotlib
+stable-baselines3
+dynamixel-sdk
+pyserial
+bleak
+imutils
