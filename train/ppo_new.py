@@ -312,7 +312,8 @@ if __name__ == "__main__":
 
         print("start training model")
         # Train the model
-        model.learn(total_timesteps=1_000_000, callback=stop_callback)
+        # model.learn(total_timesteps=1_000_000, callback=stop_callback)
+        model.learn(total_timesteps=1_000_000)
 
         # Save the model
         model.save("ppo_hand_env")
