@@ -1,5 +1,0 @@
-介紹action_space observation_space 
-解釋serial and parallel init func
-解釋step func
-model.learn 
-tests可以直接測試sensor module
