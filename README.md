@@ -67,14 +67,23 @@ manipulator/
 - imutils
 
 ## Usage
-Install the required Python packages:
-```bash
-pip install -r requirements.txt
-```
-Run `main.py`
-```bash
-python main.py
-```
+1. Install the required Python packages:
+    ```bash
+    pip install -r requirements.txt
+    ```
+2. In `main.py`, allocate the **port numbers** for the DXL handler and FSR/slider's Arduino:
+    ```python
+    fsr = FSRSerialReader(port='COM4', baudrate=115200, threshold=50)
+    dxl = DXLHandler(device_name='COM3', baudrate=1000000)
+    ```
+3. Turn on the hardware devices:
+   - Connect DXL, FSR/Slider and ensure they are supplied with sufficient voltage.
+   - Connect the webcam.
+   - Turn on the IMU.
+4. Run `main.py`
+    ```bash
+    python main.py
+    ```
 
 ## Control and Learning (`main.py`)
 `HandEnv` class in `main.py` is a custom reinforcement learning environment based on the OpenAI Gymnasium interface, designed for controlling a robotic hand with multiple sensors.
