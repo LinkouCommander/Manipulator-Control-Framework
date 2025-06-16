@@ -2,6 +2,8 @@
 
 This is a Python-based control framework for a 10-DOF robotic manipulator equipped with Dynamixel servos, a slider, a webcam, force-sensitive resistors (FSRs), and an IMU sensor. The original purpose of this project is to serve as a real-world environment for training a robotic arm to play ball using reinforcement learning (RL).
 
+![DXL](tmp/dxlgif.gif)
+
 ## Table of Contents
 
 - [Features](#features)
@@ -98,6 +100,28 @@ manipulator/
 | Action       | 7   | 6 motor controls + 1 slider         | [-1, 1]  |
 | Observation  | 10  | 6 joint positions + 1 slider + 3 FSR| [-4, 4]  |
 ### Workflow of `step()` Function
+```css
+[Action Input]
+       │
+       ▼
+[Motor & Slider Control]
+       │
+       ▼
+[Safety Monitoring]
+       │
+       ▼
+[Build Observation]
+       │
+       ▼
+[Reward Calculation]
+       │
+       ▼
+[Termination?]
+┌───────┴────────┐
+▼                ▼
+[Next Step]      [End Episode]
+
+```
 1. **Action Execution**:
     - Receives a 7-element action array:
         - **First 6 values**: Motor controls mapped to Dynamixel servo positions using linear interpolation between [-1,1] →[1800][2200]
@@ -135,7 +159,7 @@ This project uses nine Dynamixel servos (IDs: 10–12, 20–22, 30–32) to form
 - `4095` corresponds to maximum angle (approximate 360°)
 
 Below shows how the Dynamixel servo connects to PC:
-```lua
+```css
 +-------------+         USB         +------------+       TTL       +------------+
 |      PC     |  <-------------->   |    U2D2    | <-------------> | Dynamixel  |
 |  (USB Host) |                     | (Adapter)  |                 | (Servo)    |
@@ -175,6 +199,9 @@ dxl.stop_dxl()
 
 ## IMU (`imu_module.py`)
 The `BLEIMUHandler` class is a major modification made to the original Python script from the manufacturer. It serves as an interface to connect to, disconnect from, and retrieve data from IMU.
+
+![imu](tmp/imu.jpg)
+![imu](tmp/imu_inball.jpg)
 
 ### Core Functions
 - `scan()`: Performs a continuous search for BLE devices in the vicinity based on the specified target MAC address.
