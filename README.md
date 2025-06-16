@@ -134,6 +134,18 @@ This project uses nine Dynamixel servos (IDs: 10–12, 20–22, 30–32) to form
 - `0` corresponds to minimum angle (0°)
 - `4095` corresponds to maximum angle (approximate 360°)
 
+Below shows how the Dynamixel servo connects to PC:
+```lua
++------------+ USB +------------+ TTL +------------+
+| Computer | <--------------> | U2D2 | <---- two lines --> | Dynamixel |
+| (USB Host) | | (Adapter) | | (Servo) |
++------------+ +------------+ +------------+
++-------------+         USB         +------------+       TTL       +------------+
+|      PC     |  <-------------->   |    U2D2    | <-------------> | Dynamixel  |
+|  (USB Host) |                     | (Adapter)  |                 | (Servo)    |
++-------------+                     +------------+                 +------------+
+```
+
 To ensure system safety and hardware longevity, the system integrates:
 - **Collision Safety**: The command is considered a timeout if a motor fails to reach its destination within a given time.
 - **Overheat Check**: The system monitors motor temperatures using `read_temperature()` to prevent thermal overload.
