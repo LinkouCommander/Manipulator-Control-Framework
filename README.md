@@ -136,10 +136,6 @@ This project uses nine Dynamixel servos (IDs: 10–12, 20–22, 30–32) to form
 
 Below shows how the Dynamixel servo connects to PC:
 ```lua
-+------------+ USB +------------+ TTL +------------+
-| Computer | <--------------> | U2D2 | <---- two lines --> | Dynamixel |
-| (USB Host) | | (Adapter) | | (Servo) |
-+------------+ +------------+ +------------+
 +-------------+         USB         +------------+       TTL       +------------+
 |      PC     |  <-------------->   |    U2D2    | <-------------> | Dynamixel  |
 |  (USB Host) |                     | (Adapter)  |                 | (Servo)    |
